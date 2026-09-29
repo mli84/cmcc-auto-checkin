@@ -6,7 +6,7 @@
 
 # 真实凭证与运行时产物
 config.json
-.cmcc_jwt_cache.json
+.cmcc_jwt_cache*.json
 sign.log
 *.log
 

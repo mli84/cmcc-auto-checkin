@@ -61,7 +61,11 @@ USER_AGENT = (
     "leadeon/12.5.2/CMCCIT"
 )
 
-JWT_CACHE_FILE = Path(__file__).with_name(".cmcc_jwt_cache.json")
+# 常见内网/元数据主机名（不依赖 DNS 解析即可识别）
+LOCAL_HOSTNAMES = {
+    "localhost", "localhost.localdomain", "ip6-localhost",
+    "metadata.google.internal", "instance-data",
+}
 
 log = logging.getLogger("cmcc_sign")
 
@@ -75,13 +79,6 @@ class LegacyTLSAdapter(HTTPAdapter):
         ctx.set_ciphers("DEFAULT@SECLEVEL=1")
         kwargs["ssl_context"] = ctx
         return super().init_poolmanager(*args, **kwargs)
-
-
-# 常见内网/元数据主机名（不依赖 DNS 解析即可识别）
-LOCAL_HOSTNAMES = {
-    "localhost", "localhost.localdomain", "ip6-localhost",
-    "metadata.google.internal", "instance-data",
-}
 
 
 def assert_safe_url(url: str, allowed_hosts: set[str] | None = None):

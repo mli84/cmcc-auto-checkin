@@ -10,6 +10,7 @@
 | `cmcc_sign.py` | 主脚本 |
 | `config.example.json` | 配置模板，复制为 `config.json` 后填写 |
 | `.cmcc_jwt_cache.json` | 运行后自动生成的 jwt 缓存（勿外传） |
+| `images/app-token-capture.png` | app_token 抓包位置示例图 |
 
 ## 快速开始
 
@@ -32,10 +33,12 @@ python3 cmcc_sign.py --delay 600     # 随机延迟 0~600 秒执行（防风控�
 3. 在抓包记录中找到 `wx.10086.cn/qwhdsso/appTokenLogin` 这条 POST 请求；
 4. 复制请求体里 `token` 字段的完整值（形如
    `JSESSIONID=xxxx; UID=xxxx; Comment=...; ticketID=NingBo`）填入配置。
+   尾部的 `Secure`/`Path` 等 Cookie 属性标记可留可删，服务端只解析 `JSESSIONID`/`UID` 名值对。
+
+![appTokenLogin 抓包示例](images/app-token-capture.png)
 
 省编码 `provinceCode`、市编码 `cityCode` 也在同一条请求体里，一并照抄。
 `app_token` 属于账号登录凭证，**只在本地使用，不要提交到公开仓库**。
-它失效（一般数天到数周）后脚本会报 `appTokenLogin 失败`，重新抓包更新即可。
 
 ## 定时执行
 
@@ -44,12 +47,13 @@ python3 cmcc_sign.py --delay 600     # 随机延迟 0~600 秒执行（防风控�
 ```bash
 crontab -e
 # 每天早上 8 点 23 分执行（避开整点）
-23 8 * * * cd /path/to/qiandao.folder && /usr/bin/python3 cmcc_sign.py --delay 1800 >> sign.log 2>&1
+23 8 * * * cd /path/to/cmcc-auto-checkin && /usr/bin/python3 cmcc_sign.py --delay 1800 >> sign.log 2>&1
 ```
 
 ### GitHub Actions
 
-`.github/workflows/sign.yml`：
+`.github/workflows/sign.yml`（注意：在 App 内切换账号登录会使 `app_token` 失效，
+使用云上定时方案时请留意凭证状态）：
 
 ```yaml
 name: cmcc-sign
@@ -69,7 +73,7 @@ jobs:
         env:
           CMCC_APP_TOKEN: ${{ secrets.CMCC_APP_TOKEN }}
           CMCC_PHONE: ${{ secrets.CMCC_PHONE }}
-          CMCC_SERVERCHAN_SENDKEY: ${{ secrets.SERVERCHAN_SENDKEY }}  # 可选
+          CMCC_BARK_URL: ${{ secrets.CMCC_BARK_URL }}  # 可选
 ```
 
 ## 通知（可选）
@@ -94,6 +98,7 @@ POST /qwhdhub/api/mark/mark31/taskAward/<id> → 领连签奖励（--claim）
   Python 默认现代套件会握手失败，脚本挂载了自定义 SSL 适配器；
 - **系统代理**：本机开着抓包/代理工具时证书会被 MITM，脚本已禁用代理继承直连；
 - **请求头**：UA 需含 `leadeon`，API 需带 `login-check: 1` 与 `x-requested-with`；
-- `domark` 返回 `code=SUCCESS` + `status=PRIZE_NO_CONFIG` 表示签到成功、当日无单日奖品。
+- `domark` 返回 `code=SUCCESS` + `status=PRIZE_NO_CONFIG` 表示签到成功、当日无单日奖品；
+- 重复签到服务端返回 `HAVE_MARKED`，脚本视为幂等成功。
 
 仅供个人号码自动化签到使用，请勿高频调用或用于批量账号。
