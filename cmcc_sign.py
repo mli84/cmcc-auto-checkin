@@ -265,7 +265,25 @@ def do_mark(s: requests.Session, referer: str, date: str) -> dict:
 
 
 def claim_task_awards(s: requests.Session, referer: str, status_data: dict) -> list[str]:
-    """尝试领取 taskAwardChance 里的连签奖励（热门奖品库存紧张，领不到属正常）。"""
+    """尝试领取 taskAwardChance 里的连签奖励（热门奖品库存紧张，领不到属正常）。
+
+    结果行附带奖品名称（从活动数据中按任务 ID 反查），便于推送里直接识别领到了什么。
+    """
+    # 任务ID -> 奖品名（taskAwardChance 条目自身或 accumulateTaskInfo/myTaskInfo 中同名任务；
+    # 各池信息详略不一，只有取到非空名称才登记，避免空值抢先占位）
+    names = {}
+    pools = [status_data.get("taskAwardChance") or [],
+             status_data.get("accumulateTaskInfo") or [],
+             status_data.get("myTaskInfo") or []]
+    for pool in pools:
+        for t in pool:
+            tid = t.get("id")
+            if not tid or names.get(tid):
+                continue
+            name = (t.get("prize") or {}).get("name") or t.get("lotteryText") or t.get("prizeAlertText") or ""
+            if name:
+                names[tid] = name
+
     results = []
     for task in status_data.get("taskAwardChance") or []:
         tid = task.get("id")
@@ -273,7 +291,10 @@ def claim_task_awards(s: requests.Session, referer: str, status_data: dict) -> l
             continue
         r = s.post(f"{API_MARK}/mark31/taskAward/{tid}", json={}, headers=api_headers(referer), timeout=30)
         resp = r.json()
-        results.append(f"任务{tid}: {resp.get('status', resp.get('code'))} {resp.get('msg')}")
+        # status 为 None 时回落到 code（实测领奖成功响应 status 可能为空）
+        status_text = resp.get("status") or resp.get("code") or "?"
+        label = f"任务{tid}" + (f"（{names[tid]}）" if names.get(tid) else "")
+        results.append(f"{label}: {status_text} {resp.get('msg')}")
         time.sleep(random.uniform(1, 2))
     return results
 
