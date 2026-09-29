@@ -157,23 +157,31 @@ def api_headers(referer: str) -> dict:
     }
 
 
-def load_jwt_cache() -> str | None:
+def jwt_cache_file(cfg: Config) -> Path:
+    """jwt 缓存按手机尾号隔离（jwt 与账号绑定，换号配置时防止用到旧账号的凭证）。"""
+    return Path(__file__).with_name(f".cmcc_jwt_cache_{cfg.phone[-4:]}.json")
+
+
+def load_jwt_cache(cfg: Config) -> str | None:
     try:
-        data = json.loads(JWT_CACHE_FILE.read_text(encoding="utf-8"))
-        ts = data.get("saved_at", 0)
-        if time.time() - ts < 7 * 86400:  # 缓存 7 天内的 jwt 供 jwtLogin 尝试
+        data = json.loads(jwt_cache_file(cfg).read_text(encoding="utf-8"))
+        # 缓存记录签发时的手机号，与当前配置不一致则视为串号，弃用
+        if data.get("phone") != cfg.phone:
+            return None
+        if time.time() - data.get("saved_at", 0) < 30 * 86400:  # 至少 30 天内的缓存值得尝试
             return data.get("jwt") or None
     except Exception:
         pass
     return None
 
 
-def save_jwt_cache(jwt: str | None):
+def save_jwt_cache(cfg: Config, jwt: str | None):
     if not jwt:
         return
     try:
-        JWT_CACHE_FILE.write_text(
-            json.dumps({"jwt": jwt, "saved_at": time.time()}), encoding="utf-8"
+        jwt_cache_file(cfg).write_text(
+            json.dumps({"jwt": jwt, "phone": cfg.phone, "saved_at": time.time()}),
+            encoding="utf-8",
         )
     except Exception:
         pass
@@ -183,6 +191,12 @@ def exchange_session(cfg: Config) -> tuple[requests.Session, str]:
     """走 SSO 换取活动会话（QWHD_SESSION_TOKEN 落在 session cookie 里）。
 
     返回 (session, referer)。referer 是带 token 的活动页地址，后续 API 都要带。
+
+    凭证策略（实测结论）：
+    - jwt 是账号级长期凭证：appTokenLogin 请求里 jwtToken 优先于 token 字段，
+      服务端校验通过 jwt 即签发会话（token 可为空/伪造），且不受 App 内切换登录影响；
+    - 因此优先用缓存 jwt 免票据续期，app_token 仅在 jwt 缺失/失效时作引导兜底；
+    - 每次登录响应都会重签 jwt，总是回写缓存保持最新。
     """
     s = requests.Session()
     # 直连：绕过系统/环境变量代理，避免本机抓包工具的 MITM 证书干扰 SSL 验证
@@ -194,13 +208,11 @@ def exchange_session(cfg: Config) -> tuple[requests.Session, str]:
     r = s.get(SSO_LOGIN, params={"dlwmh": "true", "actUrl": cfg.act_url}, timeout=30)
     r.raise_for_status()
     m_app = re.search(r"loginPath\s*=\s*'([^']+)'", r.text)
-    m_jwt = re.search(r"jwtLoginPath\s*=\s*'([^']+)'", r.text)
     if not m_app:
         raise RuntimeError("登录页未返回 sid，SSO 入口可能已变更")
+    login_url = BASE + "/qwhdsso" + m_app.group(1)
 
-    body = {
-        "jwtToken": None,
-        "token": cfg.app_token,
+    base_body = {
         "provinceCode": cfg.province_code,
         "cityCode": cfg.city_code,
         "userCheckId": format(int(cfg.phone), "x"),  # 手机号转十六进制（前端 parseFloat().toString(16) 的等价实现）
@@ -209,22 +221,24 @@ def exchange_session(cfg: Config) -> tuple[requests.Session, str]:
         "took": random.randint(120, 900),
     }
 
-    # ② 优先尝试缓存的 jwt 登录（服务端通过 enableJwtLogin 开关控制，实测当前未启用，
-    #    开关打开后可绕过 App 票据有效期），失败自动回落 appTokenLogin
-    cached_jwt = load_jwt_cache()
-    jwt_used = False
-    jwt_enabled = "enableJwtLogin = true" in r.text or "enableJwtLogin=true" in r.text
-    login_url = BASE + "/qwhdsso" + m_app.group(1)
-    if cached_jwt and jwt_enabled and m_jwt:
-        r = s.post(BASE + "/qwhdsso" + m_jwt.group(1), json={**body, "jwtToken": cached_jwt}, timeout=30)
-        resp = r.json()
-        if resp.get("code") == "SUCCESS":
-            jwt_used = True
+    # ② 优先用缓存 jwt 免票据续期
+    resp = None
+    cached = load_jwt_cache(cfg)
+    if cached:
+        r = s.post(login_url, json={**base_body, "jwtToken": cached, "token": ""}, timeout=30)
+        try:
+            cand = r.json()
+        except ValueError:
+            cand = {}
+        if cand.get("code") == "SUCCESS":
+            resp = cand
+            log.info("jwt 续期成功（未使用 app_token）")
         else:
-            log.info("jwtLogin 失败(%s)，回落 appTokenLogin", resp.get("msg"))
+            log.info("jwt 续期失败(%s)，回落 appTokenLogin 引导", cand.get("msg"))
 
-    if not jwt_used:
-        r = s.post(login_url, json=body, timeout=30)
+    # ③ 回落：app_token 引导登录（首次配置或 jwt 失效后）
+    if resp is None:
+        r = s.post(login_url, json={**base_body, "jwtToken": None, "token": cfg.app_token}, timeout=30)
         resp = r.json()
         if resp.get("code") != "SUCCESS":
             # App 票据失效是脚本唯一的"需要人工介入"场景
@@ -234,7 +248,7 @@ def exchange_session(cfg: Config) -> tuple[requests.Session, str]:
             )
 
     data = resp["data"]
-    save_jwt_cache(data.get("jwt"))
+    save_jwt_cache(cfg, data.get("jwt"))
 
     # ③ 访问带 token 的活动页，服务器 Set-Cookie: QWHD_SESSION_TOKEN
     # URL 来自服务端响应，按 SSRF 防护约束在 wx.10086.cn 域内，且不跟随重定向

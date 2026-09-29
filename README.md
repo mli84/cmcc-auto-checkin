@@ -9,7 +9,7 @@
 |------|------|
 | `cmcc_sign.py` | 主脚本 |
 | `config.example.json` | 配置模板，复制为 `config.json` 后填写 |
-| `.cmcc_jwt_cache.json` | 运行后自动生成的 jwt 缓存（勿外传） |
+| `.cmcc_jwt_cache_<尾号>.json` | 运行后按账号自动生成的 jwt 凭证缓存（勿外传） |
 | `images/app-token-capture.png` | app_token 抓包位置示例图 |
 
 ## 快速开始
@@ -39,6 +39,17 @@ python3 cmcc_sign.py --delay 600     # 随机延迟 0~600 秒执行（防风控�
 
 省编码 `provinceCode`、市编码 `cityCode` 也在同一条请求体里，一并照抄。
 `app_token` 属于账号登录凭证，**只在本地使用，不要提交到公开仓库**。
+
+### jwt 续期（抓一次包即可长期使用）
+
+首次运行会用 `app_token` 引导登录，服务端同时签发一个账号级 jwt 并缓存到
+`.cmcc_jwt_cache_<尾号>.json`。之后每次运行脚本**优先用 jwt 续期**
+（实测 jwt 不受 App 内切换登录影响，app_token 失效后依然可用），
+`app_token` 仅在 jwt 缺失或失效时作兜底引导。
+
+因此日常无需反复抓包；只有当脚本同时报「jwt 续期失败」和
+「appTokenLogin 失败」并推送通知时，才需要重新抓包更新 `app_token`。
+缓存按手机尾号隔离并校验归属，多账号/换号配置不会串用凭证。
 
 ## 定时执行
 
