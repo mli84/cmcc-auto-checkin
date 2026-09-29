@@ -162,25 +162,39 @@ def jwt_cache_file(cfg: Config) -> Path:
     return Path(__file__).with_name(f".cmcc_jwt_cache_{cfg.phone[-4:]}.json")
 
 
-def load_jwt_cache(cfg: Config) -> str | None:
+def load_jwt_cache(cfg: Config) -> tuple[str, float] | None:
+    """返回 (jwt, 凭证链起点 first_seen)，无可用缓存时返回 None。"""
     try:
         data = json.loads(jwt_cache_file(cfg).read_text(encoding="utf-8"))
         # 缓存记录签发时的手机号，与当前配置不一致则视为串号，弃用
         if data.get("phone") != cfg.phone:
             return None
         if time.time() - data.get("saved_at", 0) < 30 * 86400:  # 至少 30 天内的缓存值得尝试
-            return data.get("jwt") or None
+            jwt = data.get("jwt")
+            if jwt:
+                return jwt, data.get("first_seen") or data.get("saved_at", time.time())
     except Exception:
         pass
     return None
 
 
 def save_jwt_cache(cfg: Config, jwt: str | None):
+    """回写最新 jwt。first_seen 记录凭证链起点（首次引导时间）并跨重签保持，
+    用于在 jwt 最终失效时计算整条凭证链的实际存活时长。"""
     if not jwt:
         return
     try:
-        jwt_cache_file(cfg).write_text(
-            json.dumps({"jwt": jwt, "phone": cfg.phone, "saved_at": time.time()}),
+        path = jwt_cache_file(cfg)
+        first_seen = time.time()
+        try:
+            old = json.loads(path.read_text(encoding="utf-8"))
+            if old.get("phone") == cfg.phone and old.get("first_seen"):
+                first_seen = old["first_seen"]
+        except Exception:
+            pass
+        path.write_text(
+            json.dumps({"jwt": jwt, "phone": cfg.phone,
+                        "first_seen": first_seen, "saved_at": time.time()}),
             encoding="utf-8",
         )
     except Exception:
@@ -225,14 +239,16 @@ def exchange_session(cfg: Config) -> tuple[requests.Session, str]:
     resp = None
     cached = load_jwt_cache(cfg)
     if cached:
-        r = s.post(login_url, json={**base_body, "jwtToken": cached, "token": ""}, timeout=30)
+        jwt_str, jwt_first_seen = cached
+        r = s.post(login_url, json={**base_body, "jwtToken": jwt_str, "token": ""}, timeout=30)
         try:
             cand = r.json()
         except ValueError:
             cand = {}
         if cand.get("code") == "SUCCESS":
             resp = cand
-            log.info("jwt 续期成功（未使用 app_token）")
+            log.info("jwt 续期成功（未使用 app_token，凭证链已 %.1f 天）",
+                     (time.time() - jwt_first_seen) / 86400)
         else:
             log.info("jwt 续期失败(%s)，回落 appTokenLogin 引导", cand.get("msg"))
 

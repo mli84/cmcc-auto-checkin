@@ -16,3 +16,6 @@ __pycache__/
 
 # macOS
 .DS_Store
+
+# jwt 寿命实验的冻结样本（含凭证，不入库）
+jwt_probe_samples.json
