@@ -11,6 +11,7 @@
 | `cmcc_extra.py` | 可选拓展模块：代币任务 / AI豆任务 / 抽奖消耗（`--tasks` / `--games`） |
 | `cmcc_seckill.py` | 假期秒杀抢券脚本(20-5门槛券) |
 | `cmcc_rate.py` | 评价有礼：每周自动满分评价 + 评价币兑换（`--exchange`） |
+| `cmcc_fee.py` | 话费余额查询（充值页 H5 通道，需 `fee_session_cookie`） |
 | `config.example.json` | 配置模板，复制为 `config.json` 后填写 |
 | `.cmcc_jwt_cache_<尾号>.json` | 运行后按账号自动生成的 jwt 凭证缓存（勿外传） |
 | `images/app-token-capture.png` | app_token 抓包位置示例图 |
@@ -29,6 +30,7 @@ python3 cmcc_sign.py --games         # 三拓展活动：打卡 + 代币任务 +
 python3 cmcc_sign.py --games --dry-run   # 只报各活动状态与余额，零消耗
 python3 cmcc_seckill.py --dry-run        # 秒杀：查场次/校时/资格（活动期）
 python3 cmcc_rate.py --dry-run           # 评价有礼：查机会/余额/档位
+python3 cmcc_fee.py --config config2.json  # 话费余额查询（需 fee_session_cookie）
 ```
 
 `--tasks` / `--games` 依赖同目录的 `cmcc_extra.py`（缺失时自动跳过并提示，不影响主签到）。
@@ -170,6 +172,31 @@ python3 cmcc_rate.py --exchange 2020419116  # 兑 1GB流量日包（10 币）
 `prizeStatus.remain` 是「月剩余兑换次数」。评价成功
 评价币实时到账，所兑卡券 48 小时内发放至 App「我的奖品」，券有效期 10 天。
 
+## 话费余额查询（可选，`cmcc_fee.py`）
+
+查询实时话费并推送：话费余额（`realBalanceFee`）与实时话费（`realFee`）。
+接口走充值页 H5 通道（`touch.10086.cn/i/v1/fee/real`），加密体系为
+AES-128-CBC（key=iv，密钥嵌在页面 JS 中，脚本已内置），手机号加密后
+作为路径参数传入，无需额外凭证。
+
+会话为**半自动**（关键限制）：服务端要求已绑定账号的 `jsessionid-cmcc`
+会话，该会话由 App 原生侧签发，纯 HTTP 无法自助建立（`qwhdsso` 的
+actUrl 白名单拒绝 touch 域名，实测返回「非法活动地址」）。获取步骤：
+
+1. 手机保持代理（Proxyman 等）；
+2. 中国移动 App 内打开一次「充值页」；
+3. 在 Proxyman 里找任意一条 `touch.10086.cn` 请求，复制 Cookie 中
+   `jsessionid-cmcc=` 后面的值；
+4. 填入配置的 `fee_session_cookie`（或环境变量 `CMCC_FEE_SESSION`）。
+
+![话费余额会话抓包示例](images/fee-session-capture.png)
+
+会话失效后脚本报 `500003` 并提示，重新抓一次即可；查询本身为只读。
+
+```bash
+python3 cmcc_fee.py --config config2.json    # 查询并推送话费余额
+```
+
 ## 拓展活动（可选，`cmcc_extra.py`）
 
 同一 SSO 通道（wx.10086.cn / qwhdhub）下还有三类收益，凭证与会话完全复用主脚本
@@ -219,6 +246,15 @@ POST /qwhdhub/account/query                         → 评价币余额/账本�
 GET  /qwhdhub/activity/info                         → 档位名称与所需评价币
 GET  /qwhdhub/assess/prizeStatus                    → 库存/资格 + 月剩余兑换次数
 GET  /qwhdhub/assess/redeem?prizeId=<id>&time=<ms>  → 兑换卡券
+```
+
+话费余额（`cmcc_fee.py`，充值页 H5 通道）：
+
+```
+GET touch.10086.cn/i/v1/fee/real/<加密手机号>       → outParam 双层 base64
+  ?time=<ts>&channel=11                               + AES-CBC 解密 → 话费余额
+会话：jsessionid-cmcc（App 原生签发，半自动填入 fee_session_cookie）
+加密：AES-128-CBC，key = iv = 043AOQGK6ykklyZA（页面 JS 内置）
 ```
 
 已知坑（脚本内已处理）：
