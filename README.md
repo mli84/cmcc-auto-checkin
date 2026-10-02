@@ -9,6 +9,7 @@
 |------|------|
 | `cmcc_sign.py` | 主脚本 |
 | `cmcc_extra.py` | 可选拓展模块：代币任务 / AI豆任务 / 抽奖消耗（`--tasks` / `--games`） |
+| `cmcc_seckill.py` | 假期秒杀抢券脚本(20-5门槛券) |
 | `config.example.json` | 配置模板，复制为 `config.json` 后填写 |
 | `.cmcc_jwt_cache_<尾号>.json` | 运行后按账号自动生成的 jwt 凭证缓存（勿外传） |
 | `images/app-token-capture.png` | app_token 抓包位置示例图 |
@@ -25,6 +26,7 @@ python3 cmcc_sign.py --delay 600     # 随机延迟 0~600 秒执行（防风控�
 python3 cmcc_sign.py --tasks         # 签到 + 顺带领签到页 AI豆任务
 python3 cmcc_sign.py --games         # 三拓展活动：打卡 + 代币任务 + 到窗口自动抽奖
 python3 cmcc_sign.py --games --dry-run   # 只报各活动状态与余额，零消耗
+python3 cmcc_seckill.py --dry-run        # 秒杀：查场次/校时/资格（活动期）
 ```
 
 `--tasks` / `--games` 依赖同目录的 `cmcc_extra.py`（缺失时自动跳过并提示，不影响主签到）。
@@ -92,11 +94,42 @@ jobs:
           CMCC_PHONE: ${{ secrets.CMCC_PHONE }}
           CMCC_BARK_URL: ${{ secrets.CMCC_BARK_URL }}  # 可选
 ```
-
 ## 通知（可选）
 
 - **Server酱**：填 `serverchan_sendkey`，签到结果推送到微信；
 - **Bark**（iOS）：填 `bark_url`（形如 `https://api.day.app/你的key`）。
+
+## 假期秒杀抢券（可选）
+
+「签到有礼」页的限时秒杀（如 5 元话费加赠券）：完成当日签到即获资格，
+每日 12:00 开抢、数量有限。会话/配置/通知与 `cmcc_sign.py` 完全共用，
+无新增配置字段；当日未签会先自动补签再抢。场次时间以服务端 `secConfig`
+返回为准，脚本自动选定进行中/最近的一场，活动改期无需改脚本。
+
+### 快速开始
+
+1. 主签到能跑即可直接用（同一份 `config.json`；多账号加 `--config` 指定）；
+2. 查场次与校时：`python3 cmcc_seckill.py --dry-run` —— 列出场次/奖品、
+   服务器时钟偏移、资格状态，**不开抢**（注意：资格=当日签到，
+   未签时该步会真实补签获取资格）；
+3. 实抢：活动期挂上 crontab（见下），或开抢前几分钟手动运行
+   `python3 cmcc_seckill.py`，到点自动出手，走 Bark/Server酱 推送。
+
+```bash
+python3 cmcc_seckill.py --dry-run    # 查场次/校时/资格，不抢
+python3 cmcc_seckill.py --once       # 立即打一发 redeem（验证响应格式）
+python3 cmcc_seckill.py              # 常驻等到下一场开抢（12:00 前几分钟启动即可）
+python3 cmcc_seckill.py --at 11:59:50 --interval 0.2   # 调参
+```
+
+抢购节奏默认提前 0.4 秒出手（`--lead`，抵消网络延迟）、每 0.35 秒一发
+（`--interval`，最多 `--max-attempts` 120 发）；redeem 返回 `PRIZE_NO_STOCK`
+（抢完）或 `PRIZE_LIMIT_*`（限次）即停，不打空枪。退出码 `0`=抢到、
+`1`=未中/异常，便于外层脚本判断。crontab 示例（工作日 11:55 启动，活动期才需要挂着）：
+
+```bash
+55 11 * * * cd /path/to/cmcc-auto-checkin && /usr/bin/python3 cmcc_seckill.py >> seckill.log 2>&1
+```
 
 ## 拓展活动（可选，`cmcc_extra.py`）
 
