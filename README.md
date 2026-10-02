@@ -10,6 +10,7 @@
 | `cmcc_sign.py` | 主脚本 |
 | `cmcc_extra.py` | 可选拓展模块：代币任务 / AI豆任务 / 抽奖消耗（`--tasks` / `--games`） |
 | `cmcc_seckill.py` | 假期秒杀抢券脚本(20-5门槛券) |
+| `cmcc_rate.py` | 评价有礼：每周自动满分评价 + 评价币兑换（`--exchange`） |
 | `config.example.json` | 配置模板，复制为 `config.json` 后填写 |
 | `.cmcc_jwt_cache_<尾号>.json` | 运行后按账号自动生成的 jwt 凭证缓存（勿外传） |
 | `images/app-token-capture.png` | app_token 抓包位置示例图 |
@@ -27,6 +28,7 @@ python3 cmcc_sign.py --tasks         # 签到 + 顺带领签到页 AI豆任务
 python3 cmcc_sign.py --games         # 三拓展活动：打卡 + 代币任务 + 到窗口自动抽奖
 python3 cmcc_sign.py --games --dry-run   # 只报各活动状态与余额，零消耗
 python3 cmcc_seckill.py --dry-run        # 秒杀：查场次/校时/资格（活动期）
+python3 cmcc_rate.py --dry-run           # 评价有礼：查机会/余额/档位
 ```
 
 `--tasks` / `--games` 依赖同目录的 `cmcc_extra.py`（缺失时自动跳过并提示，不影响主签到）。
@@ -131,6 +133,43 @@ python3 cmcc_seckill.py --at 11:59:50 --interval 0.2   # 调参
 55 11 * * * cd /path/to/cmcc-auto-checkin && /usr/bin/python3 cmcc_seckill.py >> seckill.log 2>&1
 ```
 
+## 评价有礼（可选，`cmcc_rate.py`）
+
+「评价得好礼」活动（湖南，2026-12-31 结束）：每周可做一次 App 满意度评价，
+满分 10 分得 10 评价币；评价币可兑流量/话费券——500M 月包/1GB 日包 10 币、
+2GB 日包/2 元话费券 20 币，每月限兑 4 次，活动结束评价币清零。
+会话/配置/通知与 `cmcc_sign.py` 完全共用，无新增配置字段。
+
+### 快速开始
+
+1. 主签到能跑即可直接用（同一份 `config.json`；多账号加 `--config` 指定）；
+2. 查状态：`python3 cmcc_rate.py --dry-run` —— 查本周评价机会、评价币
+   余额、各档位价格/库存（只读）；
+3. 评价与兑换：`python3 cmcc_rate.py` 本周未评则自动满分评价（按 `chance`
+   幂等，挂每日定时即可，无需挑时间）；`--exchange` **不带参数默认兑
+   「2元话费券」**（余额不足会跳过，适合挂定时攒够 20 币自动兑）；
+   `--exchange <prizeId>` 兑指定档位。
+
+档位与 prizeId 对照（以 `--dry-run` 实时输出为准）：
+
+| prizeId | 奖品 | 所需评价币 |
+|---------|------|-----------|
+| 2020419116 | 1GB流量日包 | 10 |
+| 2020419118 | 500M流量月包 | 10 |
+| 2020419114 | 2GB流量日包 | 20 |
+| 2020419120 | 2元话费券 | 20 |
+
+```bash
+python3 cmcc_rate.py --dry-run              # 查机会/余额/档位（只读）
+python3 cmcc_rate.py                        # 本周未评则自动满分评价 +10 币
+python3 cmcc_rate.py --exchange             # 默认兑 2元话费券（20 币，不足跳过）
+python3 cmcc_rate.py --exchange 2020419116  # 兑 1GB流量日包（10 币）
+```
+
+字段备注：脚本展示的「评价币余额」来自 `account/query` 的 `balance`；
+`prizeStatus.remain` 是「月剩余兑换次数」。评价成功
+评价币实时到账，所兑卡券 48 小时内发放至 App「我的奖品」，券有效期 10 天。
+
 ## 拓展活动（可选，`cmcc_extra.py`）
 
 同一 SSO 通道（wx.10086.cn / qwhdhub）下还有三类收益，凭证与会话完全复用主脚本
@@ -169,6 +208,17 @@ GET  /qwhdhub/diyTask/list/<componentId>     → 代币任务清单
 POST /qwhdhub/diyTask/finish/<taskId>        → 空 body 即发币
 POST /qwhdhub/diyLottery/period/remain/<id>  → 抽奖余额预检（只读）
 GET  /qwhdhub/diyLottery/lotterySafely/<id>  → 抽奖一次（无 body，Referer=活动页）
+```
+
+评价有礼（`cmcc_rate.py`）：
+
+```
+GET  /qwhdhub/assess/markStatus                     → 本周评价机会（chance）
+GET  /qwhdhub/assess/assess?score=10&time=<ms>      → 满分评价，+10 评价币
+POST /qwhdhub/account/query                         → 评价币余额/账本（balance）
+GET  /qwhdhub/activity/info                         → 档位名称与所需评价币
+GET  /qwhdhub/assess/prizeStatus                    → 库存/资格 + 月剩余兑换次数
+GET  /qwhdhub/assess/redeem?prizeId=<id>&time=<ms>  → 兑换卡券
 ```
 
 已知坑（脚本内已处理）：
