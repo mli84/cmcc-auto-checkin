@@ -59,10 +59,10 @@ ACTS = {
         "signed": lambda d: bool(d.get("signed")) or "已签到" in (d.get("message") or ""),
         "task_component": "50HQAg0-9YaSW4St7MDT",
         # 游戏币 10 币/次，全时段可抽；周六 12:00 起奖池拓展（非周六只攒不抽），
-        # 余额按 31 天周期清零，务必在清零前抽光
+        # 余额按 31 天周期清零，务必在清零前抽光；未中即停，防奖池抽空后白扣币
         "lottery": {"component": "50HQAg0-9YaSW4St7MDT", "wallet_key": "remainGameVal",
                     "cost": 10, "count_key": "remain", "weekday": 6, "start_hour": 12,
-                    "label": "游戏币"},
+                    "label": "游戏币", "stop_on_miss": True},
     },
     "video": {
         "name": "追剧领福利",
@@ -71,10 +71,11 @@ ACTS = {
                  "GET", "/qwhdhub/api/diyVideoDayRedesign/sign/querySignStatus"),
         "signed": lambda d: d.get("todaySignFlag") == "1",
         "task_component": "4EC96l0-9btuobajC9Yu",
-        # 抽奖次数 1 次/抽；服务端 consumeRestrictionType=1，仅周日开放
+        # 抽奖次数 1 次/抽；服务端 consumeRestrictionType=1，仅周日开放，
+        # 次数过期作废 → 未中奖也抽满（stop_on_miss=False）
         "lottery": {"component": "4EC96l0-9btuobajC9Yu", "wallet_key": "remain",
                     "cost": 1, "count_key": None, "weekday": 7,
-                    "label": "次数"},
+                    "label": "次数", "stop_on_miss": False},
     },
     "game666": {
         "name": "玩游戏抽话费（周任务）",
@@ -149,6 +150,8 @@ def run_lottery(s: requests.Session, referer: str, cfg: dict, dry_run: bool) -> 
 
     幂等由服务端余额保证（余额为 0 时无事可做），重复运行不会多扣资产。
     非窗口日只报余额不消耗：游戏币攒到周六拓展池、追剧次数仅周日开放。
+    NOT_WON 是正常「未中奖」结果（次数/币照扣），不是接口错误：
+    stop_on_miss=True 未中即停（防奖池抽空后白扣币），False 抽满为止（次数过期作废）。
     """
     comp = cfg["component"]
     rem = api_call(s, referer, "POST", f"/qwhdhub/diyLottery/period/remain/{comp}", {})
@@ -170,16 +173,22 @@ def run_lottery(s: requests.Session, referer: str, cfg: dict, dry_run: bool) -> 
         window = f"周{cfg['weekday']}" + (f" {cfg['start_hour']}:00 起" if cfg.get("start_hour") else "")
         return f"{head}；未到窗口（{window}），本次不消耗"
 
-    prizes = []
+    results = []
+    stop_on_miss = cfg.get("stop_on_miss", True)
     for _ in range(n):
         r = api_call(s, referer, "GET", f"/qwhdhub/diyLottery/lotterySafely/{comp}")
         won = (r.get("data") or [{}])[0] if r.get("code") == "SUCCESS" else None
-        if not won:
-            prizes.append(f"失败({r.get('code')} {r.get('msg')})")
+        if won:
+            results.append(str(won.get("prizeName") or "?"))
+        elif r.get("code") in ("SUCCESS", "NOT_WON"):
+            results.append("未中奖" + ("(即停)" if stop_on_miss else ""))
+            if stop_on_miss:
+                break
+        else:
+            results.append(f"失败({r.get('code')} {r.get('msg')})")
             break
-        prizes.append(str(won.get("prizeName") or "?"))
         time.sleep(random.uniform(1.2, 2.8))
-    return f"{head}，已抽 {len(prizes)} 次: {' / '.join(prizes)}"
+    return f"{head}，已抽 {len(results)} 次: {' / '.join(results)}"
 
 
 def open_finish_task(cfg: ActConfig, task: dict) -> bool:
