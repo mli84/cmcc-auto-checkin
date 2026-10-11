@@ -383,14 +383,19 @@ def notify(cfg: Config, title: str, detail: str):
                     data={"title": title, "desp": detail}, timeout=15,
                 )
         if cfg.bark_url:
-            # bark 允许自建域名，只做协议/公网边界校验
+            # bark 允许自建域名，只做协议/公网边界校验。
+            # 用 POST JSON 发送：长内容（多任务清单）走 GET 时全拼在 URL 上，
+            # 会触发服务端 431 Request Header Fields Too Large 且静默失败。
             try:
                 assert_safe_url(cfg.bark_url)
             except ValueError as e:
                 log.warning("bark_url 校验失败，已跳过通知: %s", e)
             else:
+                # 推送正文过长时截断保底（Bark 单条消息本身也有长度上限）
+                if len(detail) > 3800:
+                    detail = detail[:3800] + "\n…（内容过长已截断）"
                 try:
-                    r = s.get(cfg.bark_url, params={"title": title, "body": detail}, timeout=15)
+                    r = s.post(cfg.bark_url, json={"title": title, "body": detail}, timeout=15)
                     log.info("[通知] Bark %s: %s", r.status_code, r.text[:60])
                 except Exception as e:
                     log.warning("[通知] Bark 发送异常: %s", e)
