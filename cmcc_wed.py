@@ -399,37 +399,116 @@ def server_time(s: requests.Session, referer: str) -> tuple[float, dict]:
 
 
 def seckill_run(cfg: Config, at: str, lead: float, interval: float,
-                max_attempts: int, dry_run: bool) -> list[str]:
+                max_attempts: int, dry_run: bool, force: bool = False) -> list[str]:
     """周三充值日场次抢购：等服务器时间到点，快速连发 drawPrize 直到命中或打完预算。
 
     实测 drawPrize 未开场返回 160001「活动还未开始」，开场后 code=0 且
     data.actPrizes 带券信息。每发响应完整留痕（log），首场若落空可凭日志修正。
+
+    长时间等待的会话保活：HLWHD 会话 Cookie 仅 30 分钟有效，等待期间校时
+    失败自动重建会话，并在开火前约 2 分钟强制刷新一次，保证开火窗口内
+    会话有效。
     """
     s, referer = exchange_session(cfg, act_url=WED_ACT_URL)
 
+    def fresh_session():
+        nonlocal s, referer
+        s, referer = exchange_session(cfg, act_url=WED_ACT_URL)
+
     now_sv, info = server_time(s, referer)
-    lines = [f"服务器时钟偏差 {now_sv - time.time():+.2f}s，rdStatus={info.get('rdStatus')}"]
-    today = datetime.fromtimestamp(now_sv)
-    target = datetime.strptime(at, "%H:%M:%S").replace(
-        year=today.year, month=today.month, day=today.day)
+    skew_ms = (now_sv - time.time()) * 1000
+    now_dt = datetime.fromtimestamp(now_sv)
+    weekday_cn = "一二三四五六日"[now_dt.weekday()]
+
+    # 场次与奖品（rec_login 下发；seckillTime 缺省 [8,12,18]）
+    try:
+        rec = s.get(f"{API_WED}/_pub/rec_login", timeout=15).json().get("data") or {}
+    except Exception:
+        rec = {}
+    # seckillTime 服务端未下发时（实测为 null）不采信前端兜底的 [8,12,18]，
+    # 按 App 实际显示只取 08:00 一场
+    sk_raw = rec.get("seckillTime")
+    if sk_raw:
+        sk_hours = [int(h) for h in sk_raw]
+        sess_note = "服务端下发"
+    else:
+        sk_hours = [8]
+        sess_note = "服务端未下发，按 App 显示取 08:00"
+    nfos = rec.get("Seckillnfos") or []
+
+    lines = [f"服务器时间 {now_dt.strftime('%m-%d %H:%M:%S')}，本机时钟偏移 {skew_ms:+.0f}ms"]
+    sess_lines = []
+    for h in sk_hours:
+        t = now_dt.replace(hour=h, minute=0, second=0, microsecond=0)
+        sess_lines.append(f"  {h:02d}:00" + ("（已过）" if t.timestamp() < now_sv else ""))
+    lines.append(f"共 {len(sk_hours)} 个场次（{sess_note}）:\n" + "\n".join(sess_lines))
+    if nfos:
+        lines.append("秒杀奖品: " + "；".join(
+            f"{p.get('name','')}" + (f"（{p['subTitle']}）" if p.get("subTitle") else "")
+            for p in nfos))
+
+    # 选定目标场次：--at 优先，否则取最近一个未开始的场次
+    if at:
+        hh, mm, ss = (int(x) for x in at.split(":"))
+        target = now_dt.replace(hour=hh, minute=mm, second=ss, microsecond=0)
+        src = f"--at {at}"
+    else:
+        future = [h for h in sk_hours
+                  if now_dt.replace(hour=h, minute=0, second=0, microsecond=0).timestamp() >= now_sv]
+        if not future:
+            lines.append("今日场次已全部结束，明日再跑（或 --at 指定场次）")
+            return lines
+        target = now_dt.replace(hour=future[0], minute=0, second=0, microsecond=0)
+        src = f"场次 {future[0]:02d}:00"
     if target.timestamp() < now_sv - 3600:  # 已过目标 1 小时以上则等明天
         target += timedelta(days=1)
-    lines.append(f"目标场次 {target.strftime('%H:%M:%S')}（服务器时间），"
-                 f"提前 {lead}s 开火，间隔 {interval}s，预算 {max_attempts} 发")
+        src += "+1天"
+
+    # 场次在周三（活动规则），非周三等待只会到点空打
+    if target.weekday() != 2 and not force:
+        lines.append(f"目标日 {target.strftime('%m-%d')} 为周"
+                     f"{'一二三四五六日'[target.weekday()]}，非周三；"
+                     "确认活动改期可加 --force 强制等待")
+        return lines
+
+    away = int(target.timestamp() - now_sv)
+    lines.append(f"选定目标：{target.strftime('%m-%d %H:%M:%S')}（{src}，周{weekday_cn}），"
+                 f"距开始 {away} 秒；提前 {lead}s 开火，间隔 {interval}s，预算 {max_attempts} 发")
+
+    for ln in lines:   # 启动信息实时输出，等待期间控制台不再静默
+        log.info(ln)
 
     if dry_run:
         lines.append("[dry-run] 不发抢购请求")
         return lines
 
-    # 等待到点（含 lead 提前量）；期间每 30s 重新校时，防本机时钟漂移
+    # 等待到点（含 lead 提前量）。分段：
+    # - 距开火 >150s：每 30s 校时一次（会话失效则重建），并按服务器时钟校准截止
+    # - 150s ≥ 距开火 >30s：强制重建会话（Cookie 有效期 30 分钟），随后静候
+    # - ≤30s：0.2s 步进贴等待，到点即开火
     deadline_local = time.time() + max(0.0, target.timestamp() - lead - now_sv)
-    while time.time() < deadline_local:
-        time.sleep(min(30, max(0.1, deadline_local - time.time())))
-        try:
-            now_sv, _ = server_time(s, referer)
-            deadline_local = time.time() + max(0.0, target.timestamp() - lead - now_sv)
-        except Exception:
-            pass
+    refreshed = False
+    while True:
+        remain = deadline_local - time.time()
+        if remain <= 0:
+            break
+        if refreshed and remain > 30:
+            time.sleep(min(remain - 30, 20))
+            continue
+        if remain > 150:
+            time.sleep(min(30, remain - 150))
+            if not refreshed:
+                try:
+                    now_sv, _ = server_time(s, referer)
+                    deadline_local = time.time() + max(0.0, target.timestamp() - lead - now_sv)
+                except Exception:
+                    fresh_session()
+            continue
+        if not refreshed and remain > 30:
+            fresh_session()   # 开火前刷新会话，保证到点时 Cookie 有效
+            refreshed = True
+            continue
+        time.sleep(min(0.2, remain))
 
     last, fired = "", 0
     for i in range(1, max_attempts + 1):
@@ -470,7 +549,8 @@ def main() -> int:
     parser.add_argument("--delay", type=int, default=0, metavar="N", help="启动前随机延迟 0~N 秒")
     parser.add_argument("--seckill", action="store_true",
                         help="秒杀模式：等到目标场次时间连发 drawPrize（周三 8 点场）")
-    parser.add_argument("--at", default="08:00:00", help="秒杀场次时间（服务器时间，默认 08:00:00）")
+    parser.add_argument("--at", default=None, help="秒杀场次时间（服务器时间，默认自动选最近未开始场次）")
+    parser.add_argument("--force", action="store_true", help="目标日非周三也强制等待开抢")
     parser.add_argument("--lead", type=float, default=0.4, help="提前开火秒数（默认 0.4）")
     parser.add_argument("--interval", type=float, default=0.35, help="连发间隔秒（默认 0.35）")
     parser.add_argument("--max-attempts", type=int, default=120, help="最多连发次数（默认 120）")
@@ -496,7 +576,7 @@ def main() -> int:
         if args.seckill:
             lines = seckill_run(cfg, at=args.at, lead=args.lead,
                                 interval=args.interval, max_attempts=args.max_attempts,
-                                dry_run=args.dry_run)
+                                dry_run=args.dry_run, force=args.force)
             title = "周三充值日秒杀"
         else:
             lines = run(cfg, dry_run=args.dry_run)
@@ -505,6 +585,9 @@ def main() -> int:
         log.info("\n%s", summary)
         notify(cfg, title, f"{summary}\n手机尾号 {cfg.phone[-4:]}")
         return 0
+    except KeyboardInterrupt:
+        log.info("手动中断退出")
+        return 130
     except Exception as e:
         log.exception("执行失败: %s", e)
         notify(cfg, "周三充值日异常", f"{e}\n手机尾号 {cfg.phone[-4:] if cfg.phone else '????'}")
