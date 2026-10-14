@@ -9,8 +9,10 @@
 # 真实凭证与运行时产物
 config.json
 config2.json
+config3.json
 .venv/
 .cmcc_jwt_cache*.json
+conf.json
 sign.log
 *.log
 logs/

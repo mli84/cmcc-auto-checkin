@@ -13,6 +13,9 @@
 | `cmcc_rate.py` | 评价有礼：每周满分评价得评价币，攒够自动兑换话费/流量券 | 每周 1 次 |
 | `cmcc_seckill.py` | 假期限时秒杀（如 5 元话费加赠券） | 仅活动期 |
 | `cmcc_fee.py` | 话费余额查询并推送 | 随意 |
+| `liaoning/liaoning.py` | [辽宁移动专属活动](docs/liaoning.md)（充值先领券抽奖） | 辽宁号码每天 1 次 |
+
+分省/分活动的详细说明归档在 [docs/](docs/) 目录（如 [辽宁移动活动](docs/liaoning.md)）。
 
 所有脚本共用一份配置和凭证，互不影响；每步结果都可通过 Server酱/Bark 推送到手机。
 
