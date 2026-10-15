@@ -29,6 +29,7 @@ import logging
 import random
 import sys
 import time
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -38,6 +39,8 @@ from cmcc_sign import (  # noqa: E402
 )
 
 ACT_URL = f"{BASE}/qwhdhub/goldeneggs/1025093012?A_C_CODE=RLnnD8f2p6"
+BACK_URL = ("https://wx.10086.cn/qwhdhub/goldeneggs/1025093012"
+            "?A_C_CODE=RLnnD8f2p6&channelId=P00000003143#/")
 ROOT = Path(__file__).resolve().parent.parent   # 项目根目录
 DEFAULT_CONFIG = ROOT / "config.json"           # 与其他脚本一致：默认根目录 config.json
 
@@ -72,15 +75,55 @@ def ensure_session(cfg: LNConfig):
     return exchange_session(cfg, act_url=ACT_URL)
 
 
-def run_tasks(s, referer) -> None:
-    """任务缺口（TODO 待抓包）：
+BACK_URL = ("https://wx.10086.cn/qwhdhub/goldeneggs/1025093012"
+            "?A_C_CODE=RLnnD8f2p6&channelId=P00000003143#/")
 
-    - 「参与东北"超"级酷」：浏览型，task/list 的 url 给出
-      /qwhdhub/task/startBrowse/<id> 与 /qwhdhub/task/finish/<id>，
-      完成后 earnOpportunity +1（加抽奖机会）。报文细节待明日抓包后实现。
-    - 「邀请好友参与活动」：需真实好友响应，不做。
+
+def run_tasks(s, referer, do: bool) -> list:
+    """任务（task/list；browse 类型 GET startBrowse 即登记完成——302 到目标页、
+    无需 finish，抓包实测，任务 url 须原样携带 dwzCode/targetUrl 参数）：
+
+    - type=browse：GET 任务 url 并跟随 302 访问目标页，停留后复查
+      taskStage=DONE，完成加抽奖机会；
+    - type=share_view：邀请类，需真实好友，跳过。
+    do=False（dry-run）时只列状态，不做任何操作。返回结果行。
     """
-    return
+    out = []
+    r = s.get(f"{BASE}/qwhdhub/task/list", params={"backUrl": BACK_URL},
+              headers=api_headers(referer), timeout=30)
+    tasks = r.json().get("data") or []
+    for t in tasks:
+        name = t.get("name") or t.get("taskId")
+        stage = t.get("taskStage")
+        ttype = t.get("type") or ""
+        turl = t.get("url") or ""
+        add = t.get("earnOpportunity") or 1
+        if stage == "DONE":
+            out.append(f"✓ [任务] {name} 已完成")
+        elif stage != "UNDO":
+            out.append(f"· [任务] {name} 今日不可再做")
+        elif ttype == "browse" and turl.startswith("/qwhdhub/task/startBrowse"):
+            if do:
+                try:
+                    s.get(BASE + turl, headers=api_headers(referer), timeout=30,
+                          allow_redirects=True)
+                    time.sleep(6)
+                    r2 = s.get(f"{BASE}/qwhdhub/task/list", params={"backUrl": BACK_URL},
+                               headers=api_headers(referer), timeout=30)
+                    cur = next((x for x in r2.json().get("data") or []
+                                if x.get("taskId") == t.get("taskId")), {})
+                    if cur.get("taskStage") == "DONE":
+                        out.append(f"[任务] {name} 完成（+{add} 抽奖机会）")
+                    else:
+                        out.append(f"[任务] {name} 未生效")
+                except Exception as e:
+                    out.append(f"[任务] {name} 失败: {e}")
+            else:
+                out.append(f"→ [任务] {name}（+{add} 次，正式运行将自动完成）")
+        else:
+            out.append(f"· [任务] {name}（{ttype or '未知类型'}）需真实操作，跳过")
+        time.sleep(random.uniform(0.3, 0.6))
+    return out
 
 
 def draw(s, referer) -> str:
@@ -101,7 +144,11 @@ def draw(s, referer) -> str:
         ttype = task.get("type") or ""
         turl = task.get("url") or ""
         if ttype == "share_view" or "share" in ttype:
-            return "[抽奖] 免费机会已用完；剩余任务为邀请类（需真实好友），跳过"
+            # 服务端按 UTC 计天：每日机会在北京时间 8 点刷新（实测 winAt 差 8h）
+            now_bj = datetime.now(timezone(timedelta(hours=8)))
+            tip = ("（服务端按 UTC 计天，北京时间 8 点后刷新每日机会）"
+                   if now_bj.hour < 8 else "")
+            return f"[抽奖] 免费机会已用完；剩余任务为邀请类（需真实好友），跳过{tip}"
         if turl:
             # browse：GET 访问即跳转完成；hvb：POST ajax。完成后重抽一次
             log.info("[任务] DO_TASK %s（%s），尝试完成", task.get("name"), ttype)
@@ -146,13 +193,16 @@ def main() -> int:
     s, referer = ensure_session(cfg)
     log.info("会话建立成功")
 
-    run_tasks(s, referer)   # TODO 缺口：待 startBrowse/finish 抓包后实现
+    # 任务：dry-run 只列状态，正式运行为 UNDO 的 browse 任务自动完成
+    task_lines = run_tasks(s, referer, do=not args.dry_run)
 
     line = "[dry-run] 未抽奖"
     if not args.dry_run:
         line = draw(s, referer)
-    log.info(line)
-    notify(cfg, "辽宁充值领券", f"{line}\n手机尾号 {cfg.phone[-4:]}")
+
+    summary = "\n".join(task_lines + [line])
+    log.info("\n%s", summary)
+    notify(cfg, "辽宁充值领券", f"{summary}\n手机尾号 {cfg.phone[-4:]}")
     return 0
 
 
