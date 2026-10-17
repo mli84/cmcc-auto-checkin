@@ -23,12 +23,20 @@
      POST /qwhdhub/diyLottery/period/remain/<componentId>   余额与剩余次数（只读预检）
      GET  /qwhdhub/diyLottery/lotterySafely/<componentId>   执行一次抽奖，无 body
 
+  D. 追剧领福利「看精彩视频」每日任务（qwhdhub + cmlive 双域名）
+     GET  /qwhdhub/api/diyVideoDayRedesign/task/queryDiyVideoTask  任务/jtToken
+     GET  /qwhdhub/user/getYDRZToken?targetSourceId=017027        换视频站票据
+     POST /cmlive/api/user/auth/cmpassLoginByCmToken              换视频站 JWT
+     GET  /cmlive/api/advert/lottery/getFiveMinuteTaskInfo        下发 cToken
+     GET  /cmlive/api/advert/lottery/fiveMinuteTaskFinish         完成（+1 抽奖机会）
+     前端有 5 分钟倒计时；实测拿到 cToken 后可直接完成上报。
+
 会话与凭证完全复用 cmcc_sign.exchange_session()（jwt 自续期缓存同样生效），
 本模块只负责业务接口，不落任何凭证。
 
 用法（由 cmcc_sign.py 转发）：
   python3 cmcc_sign.py --tasks     # 主签到 + 领 AI豆任务
-  python3 cmcc_sign.py --games     # 三活动签到 + 代币任务 + 到窗口自动抽奖
+  python3 cmcc_sign.py --games     # 三活动签到 + 代币任务 + 每日看视频 + 到窗口自动抽奖
   python3 cmcc_sign.py --games --dry-run   # 只报状态与余额，不做任何写操作
 """
 
@@ -42,12 +50,24 @@ import requests
 
 from cmcc_sign import (
     BASE,
+    LegacyTLSAdapter,
+    USER_AGENT,
     api_headers,
     assert_safe_url,
     exchange_session,
 )
 
 log = logging.getLogger("cmcc_sign")
+
+# 视频站（cmlive）与 qwhdhub 是两套会话：QWHD 会话只能经 getYDRZToken
+# 换 YDRZ 票据，再调 cmpassLoginByCmToken 换视频站 JWT。017027 是 App
+# 原生 getYDRZToken 使用的 sourceId（抓包实测，001191 会被视频站拒绝）。
+CMLIVE_BASE = "https://v.cmcc-cs.cn/cmlive/api"
+CMLIVE_SOURCE_ID = "017027"
+# 仅作 Referer/播放页标识；jtToken 由任务下发
+VIDEO_REFERER = ("https://v.cmcc-cs.cn/cmlive/live/feed?id=102518"
+                 "&cmliveChannelId=203&belongChannelId=203&secondChannel=spr"
+                 "&openSelfResearch=1&tagId=157&jtCode=1")
 
 # 活动页 URL 为公开配置（非个人凭证）；若你的省份/渠道入口不同，替换 query 参数即可
 ACTS = {
@@ -71,6 +91,9 @@ ACTS = {
                  "GET", "/qwhdhub/api/diyVideoDayRedesign/sign/querySignStatus"),
         "signed": lambda d: d.get("todaySignFlag") == "1",
         "task_component": "4EC96l0-9btuobajC9Yu",
+        # 每日「看精彩视频」任务：+1 抽奖机会。
+        # 视频页在 cmlive 域，鉴权/上报接口与 qwhdhub 不同，单独处理。
+        "video_day": True,
         # 抽奖次数 1 次/抽；服务端 consumeRestrictionType=1，仅周日开放，
         # 次数过期作废 → 未中奖也抽满（stop_on_miss=False）
         "lottery": {"component": "4EC96l0-9btuobajC9Yu", "wallet_key": "remain",
@@ -213,14 +236,30 @@ def open_task_session(cfg: ActConfig, cache: dict):
 
 
 def open_handshake(cfg: ActConfig, cache: dict, jt_token: str, scan: int = 0) -> bool:
-    """开放平台任务握手：getOneTaskInfo 取 cToken → 停留 scanTime → openFinish。"""
+    """开放平台任务握手：getOneTaskInfo 取 cToken → openFinish。
+
+    先立即上报（实测可直接完成），失败再取新 cToken 并按客户端流程
+    等满 scanTime 重试，兼顾速度与成功率。
+    """
     try:
         s2, ref2 = open_task_session(cfg, cache)
-        info = api_call(s2, ref2, "POST",
-                        "/hlwyxhdhub/api/open/_pub/task/getOneTaskInfo",
-                        {"jtToken": jt_token})
-        d = info.get("data") or {}
-        ct = d.get("cToken")
+
+        def get_ct() -> tuple[str, dict]:
+            info = api_call(s2, ref2, "POST",
+                            "/hlwyxhdhub/api/open/_pub/task/getOneTaskInfo",
+                            {"jtToken": jt_token})
+            d = info.get("data") or {}
+            return d.get("cToken") or "", d
+
+        ct, d = get_ct()
+        if not ct:
+            return False
+        fin = api_call(s2, ref2, "POST",
+                       "/hlwyxhdhub/api/open/_pub/task/openFinish", {"cToken": ct})
+        if fin.get("code") == "SUCCESS":
+            return True
+        # 回退：服务端校验停留时长时，换新 cToken 等满 scanTime 再上报
+        ct, d = get_ct()
         if not ct:
             return False
         time.sleep(int(d.get("scanTime") or scan or 0) + 1)
@@ -251,9 +290,11 @@ def run_mark_tasks(s: requests.Session, referer: str, cfg, dry_run: bool) -> str
 
     按任务类别自适应：
     - taskInfo 下发 taskToken 的任务（视频/浏览类）：开放平台握手即完成
-      （getOneTaskInfo → 停留 scanTime → openFinish），无需 finishTask；
-    - 其余任务：finishTask 阶梯——直接上报 → 失败则访问目标页并停留后换
-      目标页 Referer 重试 → 仍失败且提示特殊处理再走握手。
+      （getOneTaskInfo → 先立即 openFinish，失败再等 scanTime 重试），
+      无需 finishTask；
+    - 其余任务：finishTask 阶梯——直接上报 → 失败则访问目标页后立即换
+      目标页 Referer 重试（仍失败再等 scanTime）→ 仍失败且提示特殊处理
+      再走握手。
     握手会话跨任务复用，避免逐任务完整换票；taskType/scanTime 取自 taskInfo
     （taskList 的 taskType 是另一套枚举，不可混用）。
     """
@@ -311,14 +352,16 @@ def run_mark_tasks(s: requests.Session, referer: str, cfg, dry_run: bool) -> str
                 skipped += 1
                 time.sleep(random.uniform(0.2, 0.5))
                 continue
-            # 访问目标页后带目标页 Referer 重试（停留 scanTime，封顶 15s）
+            # 访问目标页后带目标页 Referer 重试：先立即试，失败再停留
+            # scanTime 重试（服务端若已登记到访，立即重试即可过）
             if r.get("code") != "SUCCESS" and ju.startswith("https://"):
                 try:
                     assert_safe_url(ju)
                     s.get(ju, timeout=15)
-                    if scan:
-                        time.sleep(min(scan, 15) + 1)
                     r = finish(tid, task_type, ju)
+                    if r.get("code") != "SUCCESS" and scan:
+                        time.sleep(min(scan, 15) + 1)
+                        r = finish(tid, task_type, ju)
                 except (ValueError, requests.RequestException):
                     pass
                 msg = r.get("msg") or ""
@@ -340,6 +383,188 @@ def run_mark_tasks(s: requests.Session, referer: str, cfg, dry_run: bool) -> str
     cost = time.monotonic() - begun
     return (f"AI豆任务 {len(todo)} 个待办，完成 {got} 个，跳过 {skipped} 个"
             f"（第三方 App/真实操作类），外部合作区 {len(ext)} 个未计入，耗时 {cost:.0f}s")
+
+
+def cmlive_headers(referer: str, jwt: str = "") -> dict:
+    """视频站 API 头；jwt 为 cmpassLoginByCmToken 换到的 30 天 JWT。"""
+    h = {
+        "accept": "application/json, text/plain, */*",
+        "origin": "https://v.cmcc-cs.cn",
+        "referer": referer,
+        "x-requested-with": "XMLHttpRequest",
+    }
+    if jwt:
+        h["authorization"] = jwt
+    return h
+
+
+def open_cmlive_session(s: requests.Session, referer: str) -> tuple[requests.Session, str] | None:
+    """QWHD 会话 → YDRZ 票据 → 视频站 JWT（全自动，无需抓包凭证）。
+
+    视频页在 App 内用原生 getYDRZToken(sourceId=017027) 换票，这里复用
+    qwhdhub 的同名 HTTP 接口取票，再调 cmpassLoginByCmToken 换 JWT。
+    """
+    try:
+        r = s.get(f"{BASE}/qwhdhub/user/getYDRZToken",
+                  params={"targetSourceId": CMLIVE_SOURCE_ID},
+                  headers=api_headers(referer), timeout=30)
+        ydrz = r.json().get("data") or ""
+    except (ValueError, requests.RequestException) as e:
+        log.warning("[视频] YDRZ 取票失败: %s", e)
+        return None
+    if not ydrz:
+        log.warning("[视频] YDRZ 取票为空（sourceId=%s）", CMLIVE_SOURCE_ID)
+        return None
+
+    # 视频站只接受老式 TLS 套件，且必须直连（避免本机代理 MITM 证书）
+    cs = requests.Session()
+    cs.trust_env = False
+    cs.mount("https://", LegacyTLSAdapter())
+    cs.headers.update({"user-agent": USER_AGENT,
+                       "accept-language": "zh-CN,zh-Hans;q=0.9"})
+    try:
+        r = cs.post(f"{CMLIVE_BASE}/user/auth/cmpassLoginByCmToken",
+                    json={"cmpassToken": ydrz},
+                    headers=cmlive_headers(VIDEO_REFERER, ""), timeout=30)
+        resp = r.json()
+    except (ValueError, requests.RequestException) as e:
+        log.warning("[视频] 视频站登录失败: %s", e)
+        return None
+    jwt = resp.get("object") if isinstance(resp.get("object"), str) else ""
+    if resp.get("rtnCode") != "0" or not jwt:
+        log.warning("[视频] 视频站登录被拒: %s %s", resp.get("rtnCode"), resp.get("rtnMsg"))
+        return None
+    return cs, jwt
+
+
+def cmlive_get(cs: requests.Session, jwt: str, path: str, params: dict,
+               referer: str) -> dict:
+    """视频站 GET；网关异常按失败结构返回，不抛异常。"""
+    try:
+        r = cs.get(f"{CMLIVE_BASE}{path}", params=params,
+                   headers=cmlive_headers(referer, jwt), timeout=30)
+        return r.json()
+    except ValueError:
+        return {"rtnCode": f"HTTP_{getattr(r, 'status_code', 0)}", "rtnMsg": "响应非 JSON"}
+    except requests.RequestException as e:
+        return {"rtnCode": "NETWORK_ERROR", "rtnMsg": str(e)}
+
+
+def video_remain(s: requests.Session, referer: str) -> int | None:
+    """视频日抽奖次数余额（只读），用于核对任务是否真的 +1。"""
+    r = api_call(s, referer, "POST",
+                 "/qwhdhub/diyLottery/period/remain/4EC96l0-9btuobajC9Yu", {})
+    if r.get("code") != "SUCCESS":
+        return None
+    return (r.get("data") or {}).get("remain")
+
+
+def run_video_day(s: requests.Session, referer: str, dry_run: bool) -> str:
+    """视频日「看精彩视频」每日任务：+1 抽奖机会。
+
+    链路（抓包 + 前端 JS 双重确认）：
+      queryDiyVideoTask 取任务/jtToken
+      → startBrowse 登记「去完成」（不跟随跳转）
+      → getFiveMinuteTaskInfo(token=jtToken) 下发 cToken
+      → fiveMinuteTaskFinish(token=cToken) 完成任务
+
+    前端有 300 秒倒计时；实测拿到 cToken 后可直接上报成功，因此这里不等待。
+
+    任务名随星期变化（如「视频非周日六」「视频周日」），按 taskStage=UNDO
+    且 todayRemain>0 自适应选取，不写死任务 ID。
+    """
+    r = api_call(s, referer, "GET", "/qwhdhub/api/diyVideoDayRedesign/task/queryDiyVideoTask")
+    data = r.get("data") or {}
+    if r.get("code") != "SUCCESS":
+        return f"视频任务清单获取失败: {r.get('code')} {r.get('msg')}"
+    todo = [t for t in data.get("undoTodayTaskList") or []
+            if t.get("taskStage") == "UNDO"
+            and int(t.get("todayRemain") or 0) > 0
+            and int(t.get("earnOpportunity") or 0) > 0]
+    if not todo:
+        return "视频任务今日已完成（或已到上限）"
+    # 任务名随星期变化（视频非周日六/视频周日…），按“视频”或 cmlive
+    # 目标页识别；只有单个待办时直接用它，避免服务端改名后漏做
+    video_todo = [t for t in todo
+                  if "视频" in f"{t.get('name') or ''}{t.get('description') or ''}"
+                  or "cmlive" in str(t.get("url") or "")]
+    if not video_todo and len(todo) == 1:
+        video_todo = todo
+    if not video_todo:
+        return "今日待办中没有可识别的视频任务"
+    task = video_todo[0]
+    name = task.get("name") or "看精彩视频"
+    if dry_run:
+        return f"视频任务待办：{name}（正式运行自动完成）"
+
+    jt = str(task.get("param") or "")
+    if not jt.startswith("QWHD_") and task.get("taskId"):
+        jt = "QWHD_" + str(task["taskId"])
+    if not jt:
+        return f"视频任务 {name} 缺少 jtToken"
+
+    # ① 与 App 内点「去完成」一致：登记浏览入口。失败不阻断，
+    #    真正的完成判定在 fiveMinuteTaskFinish。
+    turl = str(task.get("url") or "")
+    if turl:
+        try:
+            target = BASE + turl if turl.startswith("/") else turl
+            if target.startswith(BASE):
+                s.get(target, headers=api_headers(referer), timeout=30,
+                      allow_redirects=False)
+            else:
+                assert_safe_url(target, allowed_hosts={"wx.10086.cn"})
+                s.get(target, headers=api_headers(referer), timeout=30,
+                      allow_redirects=False)
+        except (ValueError, requests.RequestException) as e:
+            log.debug("[视频] startBrowse 失败（不阻断）: %s", e)
+
+    # ② 视频站会话 + cToken
+    opened = open_cmlive_session(s, referer)
+    if not opened:
+        return f"视频任务 {name} 失败：视频站登录未成功"
+    cs, jwt = opened
+
+    ref = VIDEO_REFERER + "&jtToken=" + jt
+    remain_before = video_remain(s, referer)
+    info = cmlive_get(cs, jwt, "/advert/lottery/getFiveMinuteTaskInfo",
+                      {"token": jt}, ref)
+    obj = info.get("object") or {}
+    d = obj.get("data") or {}
+    if info.get("rtnCode") != "0" or obj.get("code") != "SUCCESS" or not d:
+        return (f"视频任务 {name} 领取失败: "
+                f"{info.get('rtnCode')} {obj.get('msg') or info.get('rtnMsg')}")
+    status = str(d.get("status") or "")
+    if status == "0":
+        return f"视频任务今日已完成（{d.get('finishDesc') or '奖励已发放'}）"
+    if status != "1":
+        return f"视频任务状态异常（status={status or '空'}），暂不观看"
+    ctoken = d.get("cToken") or ""
+    if not ctoken:
+        return f"视频任务 {name} 未下发 cToken"
+
+    # ③ 直接完成上报（实测无需等待倒计时）
+    fin = cmlive_get(cs, jwt, "/advert/lottery/fiveMinuteTaskFinish",
+                     {"token": ctoken}, ref)
+    fobj = fin.get("object") or {}
+    if fin.get("rtnCode") != "0" or not fobj.get("data"):
+        return (f"视频任务 {name} 完成上报失败: "
+                f"{fin.get('rtnCode')} {fobj.get('msg') or fin.get('rtnMsg')}")
+
+    # ⑤ 复查任务与次数
+    chk = api_call(s, referer, "GET",
+                   "/qwhdhub/api/diyVideoDayRedesign/task/queryDiyVideoTask")
+    cdata = chk.get("data") or {}
+    done = (int(cdata.get("doneDayCount") or 0) > int(data.get("doneDayCount") or 0)
+            or not any(t.get("taskId") == task.get("taskId")
+                       for t in cdata.get("undoTodayTaskList") or []))
+    remain_after = video_remain(s, referer)
+    add = (f"（+{remain_after - remain_before} 次）"
+           if remain_before is not None and remain_after is not None
+           and remain_after > remain_before else "")
+    if done:
+        return f"视频任务 {name} 完成{add}"
+    return f"视频任务 {name} 已上报，但状态未刷新，请稍后复查"
 
 
 def run_games(cfg, dry_run: bool) -> list[str]:
@@ -364,6 +589,9 @@ def run_games(cfg, dry_run: bool) -> list[str]:
 
         if act.get("task_component"):
             lines.append(f"{act['name']} {run_diy_tasks(s, referer, act['task_component'], dry_run)}")
+        if act.get("video_day"):
+            # 放在抽奖之前：视频任务 +1 次，周日抽奖能立刻用上
+            lines.append(f"{act['name']} {run_video_day(s, referer, dry_run)}")
         if act.get("lottery"):
             lines.append(f"{act['name']} {run_lottery(s, referer, act['lottery'], dry_run)}")
         time.sleep(random.uniform(1.5, 4))

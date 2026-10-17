@@ -107,11 +107,17 @@ def run_tasks(s, referer, do: bool) -> list:
                 try:
                     s.get(BASE + turl, headers=api_headers(referer), timeout=30,
                           allow_redirects=True)
-                    time.sleep(6)
-                    r2 = s.get(f"{BASE}/qwhdhub/task/list", params={"backUrl": BACK_URL},
-                               headers=api_headers(referer), timeout=30)
-                    cur = next((x for x in r2.json().get("data") or []
-                                if x.get("taskId") == t.get("taskId")), {})
+                    # 轮询代替固定 6 秒：状态一登记为 DONE 就继续
+                    cur = {}
+                    for wait in (0, 1, 2, 3):
+                        if wait:
+                            time.sleep(wait)
+                        r2 = s.get(f"{BASE}/qwhdhub/task/list", params={"backUrl": BACK_URL},
+                                   headers=api_headers(referer), timeout=30)
+                        cur = next((x for x in r2.json().get("data") or []
+                                    if x.get("taskId") == t.get("taskId")), {})
+                        if cur.get("taskStage") == "DONE":
+                            break
                     if cur.get("taskStage") == "DONE":
                         out.append(f"[任务] {name} 完成（+{add} 抽奖机会）")
                     else:

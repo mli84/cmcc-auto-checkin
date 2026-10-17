@@ -143,7 +143,7 @@ def task_lines(tasks: list[dict]) -> list[str]:
 
 def open_handshake_wed(cfg: Config, jump: str, jt_token: str) -> bool:
     """开放平台完成链：携 jtToken 为目标页换会话 → getOneTaskInfo 取 cToken
-    → 停留 scanTime → openFinish。
+    → openFinish（先立即试，失败再等 scanTime 重试）。
 
     会话必须是目标页自己的（App 内点「去完成」时 WebView 打开目标页并
     经 SSO 落对应令牌：签到页→QWHD、充值日页→HLWHD），否则兑换返回
@@ -162,13 +162,24 @@ def open_handshake_wed(cfg: Config, jump: str, jt_token: str) -> bool:
     if s2 is None:
         log.warning("[任务] 目标页会话换票失败: %s", last_err)
         return False
-    info = s2.post("https://wx.10086.cn/hlwyxhdhub/api/open/_pub/task/getOneTaskInfo",
-                   json={"jtToken": jt_token}, headers=api_headers(ref2), timeout=30)
-    d = info.json().get("data") or {}
-    ct = d.get("cToken")
+
+    def get_ct() -> tuple[str, dict]:
+        info = s2.post("https://wx.10086.cn/hlwyxhdhub/api/open/_pub/task/getOneTaskInfo",
+                       json={"jtToken": jt_token}, headers=api_headers(ref2), timeout=30)
+        d = info.json().get("data") or {}
+        return d.get("cToken") or "", d
+
+    ct, d = get_ct()
     if not ct:
-        log.info("[任务] getOneTaskInfo 未取得 cToken: %s %s",
-                 info.json().get("code"), info.json().get("msg"))
+        log.info("[任务] getOneTaskInfo 未取得 cToken")
+        return False
+    fin = s2.post("https://wx.10086.cn/hlwyxhdhub/api/open/_pub/task/openFinish",
+                  json={"cToken": ct}, headers=api_headers(ref2), timeout=30)
+    if fin.json().get("code") == "SUCCESS":
+        return True
+    # 回退：换新 cToken 等满 scanTime 再上报
+    ct, d = get_ct()
+    if not ct:
         return False
     time.sleep(int(d.get("scanTime") or 5) + 1)
     fin = s2.post("https://wx.10086.cn/hlwyxhdhub/api/open/_pub/task/openFinish",
@@ -244,9 +255,12 @@ def finish_tasks(cfg: Config, s: requests.Session, referer: str,
             except Exception as e:
                 log.warning("[任务] %s jt 握手异常: %s", title, e)
             if hs_ok:
-                time.sleep(1)
                 try:
                     cur = task_status(tid)
+                    # 状态刷新偶有延迟：先立即查，未完成再等 1 秒复查
+                    if cur.get("status") != 2:
+                        time.sleep(1)
+                        cur = task_status(tid)
                     if cur.get("status") == 2:
                         lines.append(f"[任务] {title} 代做成功（+1 次）")
                         done = True
