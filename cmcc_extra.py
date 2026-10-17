@@ -459,49 +459,35 @@ def video_remain(s: requests.Session, referer: str) -> int | None:
     return (r.get("data") or {}).get("remain")
 
 
-def run_video_day(s: requests.Session, referer: str, dry_run: bool) -> str:
-    """视频日「看精彩视频」每日任务：+1 抽奖机会。
+def _video_tasks(data: dict) -> list[dict]:
+    """从任务清单中筛出今日可做的视频任务。
 
-    链路（抓包 + 前端 JS 双重确认）：
-      queryDiyVideoTask 取任务/jtToken
-      → startBrowse 登记「去完成」（不跟随跳转）
-      → getFiveMinuteTaskInfo(token=jtToken) 下发 cToken
-      → fiveMinuteTaskFinish(token=cToken) 完成任务
-
-    前端有 300 秒倒计时；实测拿到 cToken 后可直接上报成功，因此这里不等待。
-
-    任务名随星期变化（如「视频非周日六」「视频周日」），按 taskStage=UNDO
-    且 todayRemain>0 自适应选取，不写死任务 ID。
+    周日会下发「视频周日1」「视频周日2」两个独立任务（各 maxPerDay=1），
+    其他时间只有 1 个；按 taskStage/todayRemain/earnOpportunity 自适应，
+    不写死任务 ID。
     """
-    r = api_call(s, referer, "GET", "/qwhdhub/api/diyVideoDayRedesign/task/queryDiyVideoTask")
-    data = r.get("data") or {}
-    if r.get("code") != "SUCCESS":
-        return f"视频任务清单获取失败: {r.get('code')} {r.get('msg')}"
     todo = [t for t in data.get("undoTodayTaskList") or []
             if t.get("taskStage") == "UNDO"
             and int(t.get("todayRemain") or 0) > 0
             and int(t.get("earnOpportunity") or 0) > 0]
-    if not todo:
-        return "视频任务今日已完成（或已到上限）"
-    # 任务名随星期变化（视频非周日六/视频周日…），按“视频”或 cmlive
-    # 目标页识别；只有单个待办时直接用它，避免服务端改名后漏做
-    video_todo = [t for t in todo
-                  if "视频" in f"{t.get('name') or ''}{t.get('description') or ''}"
-                  or "cmlive" in str(t.get("url") or "")]
-    if not video_todo and len(todo) == 1:
-        video_todo = todo
-    if not video_todo:
-        return "今日待办中没有可识别的视频任务"
-    task = video_todo[0]
-    name = task.get("name") or "看精彩视频"
-    if dry_run:
-        return f"视频任务待办：{name}（正式运行自动完成）"
+    video = [t for t in todo
+             if "视频" in f"{t.get('name') or ''}{t.get('description') or ''}"
+             or "cmlive" in str(t.get("url") or "")]
+    # 服务端改名后若只剩一个待办，直接当作视频任务处理
+    if not video and len(todo) == 1:
+        video = todo
+    return video
 
+
+def _complete_video_task(s: requests.Session, referer: str, task: dict,
+                         cs: requests.Session, jwt: str) -> tuple[bool, str]:
+    """完成单个视频任务，成功返回 (True, 结果文案)。"""
+    name = task.get("name") or "看精彩视频"
     jt = str(task.get("param") or "")
     if not jt.startswith("QWHD_") and task.get("taskId"):
         jt = "QWHD_" + str(task["taskId"])
     if not jt:
-        return f"视频任务 {name} 缺少 jtToken"
+        return False, f"{name} 缺少 jtToken"
 
     # ① 与 App 内点「去完成」一致：登记浏览入口。失败不阻断，
     #    真正的完成判定在 fiveMinuteTaskFinish。
@@ -519,52 +505,93 @@ def run_video_day(s: requests.Session, referer: str, dry_run: bool) -> str:
         except (ValueError, requests.RequestException) as e:
             log.debug("[视频] startBrowse 失败（不阻断）: %s", e)
 
-    # ② 视频站会话 + cToken
-    opened = open_cmlive_session(s, referer)
-    if not opened:
-        return f"视频任务 {name} 失败：视频站登录未成功"
-    cs, jwt = opened
-
+    # ② 取 cToken
     ref = VIDEO_REFERER + "&jtToken=" + jt
-    remain_before = video_remain(s, referer)
     info = cmlive_get(cs, jwt, "/advert/lottery/getFiveMinuteTaskInfo",
                       {"token": jt}, ref)
     obj = info.get("object") or {}
     d = obj.get("data") or {}
     if info.get("rtnCode") != "0" or obj.get("code") != "SUCCESS" or not d:
-        return (f"视频任务 {name} 领取失败: "
-                f"{info.get('rtnCode')} {obj.get('msg') or info.get('rtnMsg')}")
+        return False, (f"{name} 领取失败: "
+                       f"{info.get('rtnCode')} {obj.get('msg') or info.get('rtnMsg')}")
     status = str(d.get("status") or "")
     if status == "0":
-        return f"视频任务今日已完成（{d.get('finishDesc') or '奖励已发放'}）"
+        return True, f"{name} 已完成（{d.get('finishDesc') or '奖励已发放'}）"
     if status != "1":
-        return f"视频任务状态异常（status={status or '空'}），暂不观看"
+        return False, f"{name} 状态异常（status={status or '空'}）"
     ctoken = d.get("cToken") or ""
     if not ctoken:
-        return f"视频任务 {name} 未下发 cToken"
+        return False, f"{name} 未下发 cToken"
 
     # ③ 直接完成上报（实测无需等待倒计时）
     fin = cmlive_get(cs, jwt, "/advert/lottery/fiveMinuteTaskFinish",
                      {"token": ctoken}, ref)
     fobj = fin.get("object") or {}
     if fin.get("rtnCode") != "0" or not fobj.get("data"):
-        return (f"视频任务 {name} 完成上报失败: "
-                f"{fin.get('rtnCode')} {fobj.get('msg') or fin.get('rtnMsg')}")
+        return False, (f"{name} 上报失败: "
+                       f"{fin.get('rtnCode')} {fobj.get('msg') or fin.get('rtnMsg')}")
+    return True, f"{name} 完成"
 
-    # ⑤ 复查任务与次数
-    chk = api_call(s, referer, "GET",
-                   "/qwhdhub/api/diyVideoDayRedesign/task/queryDiyVideoTask")
-    cdata = chk.get("data") or {}
-    done = (int(cdata.get("doneDayCount") or 0) > int(data.get("doneDayCount") or 0)
-            or not any(t.get("taskId") == task.get("taskId")
-                       for t in cdata.get("undoTodayTaskList") or []))
+
+def run_video_day(s: requests.Session, referer: str, dry_run: bool) -> str:
+    """视频日「看精彩视频」任务：每完成一个 +1 抽奖机会。
+
+    链路（抓包 + 前端 JS 双重确认）：
+      queryDiyVideoTask 取任务/jtToken
+      → startBrowse 登记「去完成」（不跟随跳转）
+      → getFiveMinuteTaskInfo(token=jtToken) 下发 cToken
+      → fiveMinuteTaskFinish(token=cToken) 完成任务
+
+    前端有 300 秒倒计时；实测拿到 cToken 后可直接上报成功，因此这里不等待。
+
+    次数规则：每周最多 8 次；周日可做 2 次（两个独立任务），其他时间
+    1 次。每完成一个都重新拉清单，把当天能做的全部做完。
+    """
+    r = api_call(s, referer, "GET",
+                 "/qwhdhub/api/diyVideoDayRedesign/task/queryDiyVideoTask")
+    data = r.get("data") or {}
+    if r.get("code") != "SUCCESS":
+        return f"视频任务清单获取失败: {r.get('code')} {r.get('msg')}"
+    tasks = _video_tasks(data)
+    if not tasks:
+        return "视频任务今日已完成（或已到上限）"
+    if dry_run:
+        names = "、".join(t.get("name") or "看精彩视频" for t in tasks)
+        return f"视频任务待办 {len(tasks)} 个：{names}（正式运行自动完成）"
+
+    opened = open_cmlive_session(s, referer)
+    if not opened:
+        return "视频任务失败：视频站登录未成功"
+    cs, jwt = opened
+    remain_before = video_remain(s, referer)
+
+    results: list[str] = []
+    ok_count = 0
+    for _ in range(5):  # 周日最多 2 个，留足余量并防异常循环
+        # 每轮重新拉清单：完成一个后服务端才放出下一个（周日 2 个）
+        r = api_call(s, referer, "GET",
+                     "/qwhdhub/api/diyVideoDayRedesign/task/queryDiyVideoTask")
+        if r.get("code") != "SUCCESS":
+            results.append(f"清单刷新失败: {r.get('msg')}")
+            break
+        tasks = _video_tasks(r.get("data") or {})
+        if not tasks:
+            break
+        ok, msg = _complete_video_task(s, referer, tasks[0], cs, jwt)
+        results.append(("✓ " if ok else "✗ ") + msg)
+        if not ok:
+            break
+        ok_count += 1
+        time.sleep(1)  # 给任务清单一点刷新时间
+
     remain_after = video_remain(s, referer)
     add = (f"（+{remain_after - remain_before} 次）"
            if remain_before is not None and remain_after is not None
            and remain_after > remain_before else "")
-    if done:
-        return f"视频任务 {name} 完成{add}"
-    return f"视频任务 {name} 已上报，但状态未刷新，请稍后复查"
+    detail = "；".join(results) if results else "今日已完成（或已到上限）"
+    if ok_count > 1:
+        return f"视频任务完成 {ok_count} 次：{detail}{add}"
+    return f"视频任务 {detail}{add}"
 
 
 def run_games(cfg, dry_run: bool) -> list[str]:
