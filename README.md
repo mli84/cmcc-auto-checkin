@@ -56,6 +56,7 @@ python3 cmcc_sign.py --dry-run          # 或先只查状态，不做任何操�
 |------|------|------|
 | `app_token` | App 票据，抓包获取（环境变量 `CMCC_APP_TOKEN`） | 必填 |
 | `phone` | 手机号（`CMCC_PHONE`） | 必填 |
+| `coc3_phone` | AI豆苗养成记的 `phone` 请求头凭证，抓包 `dev.coc.10086.cn` 请求获取（`CMCC_COC3_PHONE`） | 选填 |
 | `province_code` / `city_code` | 省/市编码（`CMCC_PROVINCE_CODE` / `CMCC_CITY_CODE`） | 731 / 0731 |
 | `fee_session_cookie` | 话费查询用会话，见 `cmcc_fee.py` 一节（`CMCC_FEE_SESSION`） | 选填 |
 | `serverchan_sendkey` | Server酱推送（`CMCC_SERVERCHAN_SENDKEY`） | 选填 |

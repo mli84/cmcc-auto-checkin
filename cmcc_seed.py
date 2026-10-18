@@ -44,6 +44,7 @@ import argparse
 import hashlib
 import json
 import logging
+import os
 import random
 import re
 import sys
@@ -88,8 +89,10 @@ class SeedConfig:
         raw = json.loads(Path(path).read_text(encoding="utf-8"))
         self.path = Path(path)
         self.phone = str(raw.get("phone") or "")
-        self.coc3_phone = str(raw.get("coc3_phone") or "")
-        self.coc3_channel = str(raw.get("coc3_channel") or DEFAULT_CHANNEL)
+        self.coc3_phone = str(os.environ.get("CMCC_COC3_PHONE")
+                              or raw.get("coc3_phone") or "")
+        self.coc3_channel = str(os.environ.get("CMCC_COC3_CHANNEL")
+                                or raw.get("coc3_channel") or DEFAULT_CHANNEL)
         self.coc3_wtac = str(raw.get("coc3_wtac") or DEFAULT_WTAC)
         self.bark_url = raw.get("bark_url", "")
         self.serverchan_sendkey = raw.get("serverchan_sendkey", "")
