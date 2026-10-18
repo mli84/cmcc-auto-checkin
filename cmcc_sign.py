@@ -26,6 +26,7 @@
   python3 cmcc_sign.py --config config.json            # 常规签到（自动领累计/连签奖励）
   python3 cmcc_sign.py --dry-run                       # 只查状态，同时报「可领未领」奖励
   python3 cmcc_sign.py --no-claim                      # 只签到，不领奖
+  python3 cmcc_sign.py --seed                          # 顺带跑 AI豆苗养成记（需 coc3_phone）
   python3 cmcc_sign.py --delay 600                     # 启动前随机延迟 0~600 秒（防风控）
 
 退出码：0 = 签到成功或今日已签；1 = 失败（便于 CI 判断）
@@ -130,6 +131,8 @@ class Config:
         self.channel_id = env.get("CMCC_CHANNEL_ID", file_cfg.get("channel_id", "P00000109876"))
         self.serverchan_sendkey = env.get("CMCC_SERVERCHAN_SENDKEY", file_cfg.get("serverchan_sendkey", ""))
         self.bark_url = env.get("CMCC_BARK_URL", file_cfg.get("bark_url", ""))
+        # 供 --seed 转交 cmcc_seed.py 读取同一份配置（含 coc3_phone）
+        self.config_path = str(path) if path else ""
 
     @property
     def act_url(self) -> str:
@@ -406,7 +409,7 @@ def notify(cfg: Config, title: str, detail: str):
 # ---------------------------------------------------------------- 主流程
 
 def run(cfg: Config, dry_run: bool, claim: bool = True, tasks: bool = False,
-        games: bool = False, wed: bool = False) -> int:
+        games: bool = False, wed: bool = False, seed: bool = False) -> int:
     today = datetime.now().strftime("%Y%m%d")
 
     # 重建会话的兜底：第一次失败若是会话问题，重建后再试一次
@@ -517,10 +520,31 @@ def run(cfg: Config, dry_run: bool, claim: bool = True, tasks: bool = False,
             except Exception as e:
                 lines.append(f"[拼图] 失败: {e}")
 
+    # AI豆苗养成记（可选模块 cmcc_seed.py，独立 phone 头鉴权）
+    seed_failed = False
+    if seed:
+        try:
+            import cmcc_seed
+        except ImportError:
+            lines.append("[AI豆苗] 未找到 cmcc_seed.py，已跳过")
+        else:
+            try:
+                rc, detail = cmcc_seed.run(
+                    cfg.config_path or "config.json",
+                    dry_run=dry_run, notify_result=False)
+                for line in detail.splitlines():
+                    lines.append(f"[AI豆苗] {line}")
+                if rc != 0:
+                    seed_failed = True
+                    lines.append("[AI豆苗] 执行异常（凭证可能已失效，详见日志）")
+            except Exception as e:
+                seed_failed = True
+                lines.append(f"[AI豆苗] 失败: {e}")
+
     summary = "\n".join(lines)
     log.info("\n%s", summary)
     notify(cfg, "移动签到通知", f"{summary}\n手机尾号 {cfg.phone[-4:]}")
-    return 0
+    return 1 if seed_failed else 0
 
 
 def main() -> int:
@@ -536,6 +560,8 @@ def main() -> int:
                         help="跑拓展活动：周六游戏中心/追剧/抽话费页的打卡+任务+抽奖（需 cmcc_extra.py）")
     parser.add_argument("--wed", action="store_true",
                         help="顺带跑周三充值日拼图抽奖（需 cmcc_wed.py）")
+    parser.add_argument("--seed", action="store_true",
+                        help="顺带跑 AI豆苗养成记签到/任务/领阳光值（需 cmcc_seed.py 与 coc3_phone）")
     parser.add_argument("--delay", type=int, default=0, metavar="N", help="启动前随机延迟 0~N 秒")
     args = parser.parse_args()
 
@@ -557,7 +583,8 @@ def main() -> int:
 
     try:
         return run(cfg, dry_run=args.dry_run, claim=args.claim,
-                   tasks=args.tasks, games=args.games, wed=args.wed)
+                   tasks=args.tasks, games=args.games, wed=args.wed,
+                   seed=args.seed)
     except Exception as e:
         log.exception("执行失败: %s", e)
         notify(cfg, "移动签到异常", f"{e}\n手机尾号 {cfg.phone[-4:] if cfg.phone else '????'}")

@@ -12,6 +12,7 @@ config2.json
 config3.json
 .venv/
 .cmcc_jwt_cache*.json
+.cmcc_seed_state*.json
 conf.json
 sign.log
 *.log

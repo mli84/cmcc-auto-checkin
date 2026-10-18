@@ -11,6 +11,7 @@
 | `cmcc_sign.py` | 每日签到、自动领取累计/连签奖励、AI豆任务、拓展活动、周三充值日 | 每天 1 次 |
 | `cmcc_wed.py` | 周三充值日：每日任务 + 抽拼图 + 集齐自动领券 + 场次秒杀 | 每天 1 次（秒杀仅周三） |
 | `cmcc_rate.py` | 评价有礼：每周满分评价得评价币，攒够自动兑换话费/流量券 | 每周 1 次 |
+| `cmcc_seed.py` | AI豆苗养成记：签到、浏览/直播/分享任务、领取阳光值 | 每天 1 次 |
 | `cmcc_seckill.py` | 假期限时秒杀（如 5 元话费加赠券） | 仅活动期 |
 | `cmcc_fee.py` | 话费余额查询并推送 | 随意 |
 | `liaoning/liaoning.py` | [辽宁移动专属活动](docs/liaoning.md)（充值先领券抽奖） | 辽宁号码每天 1 次 |
@@ -67,15 +68,16 @@ python3 cmcc_sign.py --dry-run          # 或先只查状态，不做任何操�
 ## 每日主脚本 `cmcc_sign.py`
 
 默认运行做两件事：**每日签到** 和 **自动领取累计/连签奖励**。
-AI豆任务、拓展活动、周三充值日通过参数选择，可任意组合：
+AI豆任务、拓展活动、AI豆苗养成记、周三充值日通过参数选择，可任意组合：
 
 ```bash
 python3 cmcc_sign.py                          # 签到 + 领取累计/连签奖励
-python3 cmcc_sign.py --tasks --games --wed    # 再加上全部顺带活动
+python3 cmcc_sign.py --tasks --games --seed --wed    # 再加上全部顺带活动
 
 # 按需单独叠加
 python3 cmcc_sign.py --tasks                  # 加做 AI豆任务
 python3 cmcc_sign.py --games                  # 加做拓展活动
+python3 cmcc_sign.py --seed                   # 加做 AI豆苗养成记
 python3 cmcc_sign.py --wed                    # 加做周三充值日
 
 # 其他选项
@@ -139,6 +141,25 @@ python3 cmcc_rate.py --exchange <prizeId>   # 兑指定档位
 
 每日运行亦可（按周幂等，重复运行不会重复评价）。档位与所需评价币
 以 `--dry-run` 实时输出为准。
+
+## AI豆苗养成记 `cmcc_seed.py`
+
+移动爱购「AI豆苗养成记」：每日签到、浏览/直播/分享任务，完成后自动
+领取阳光值，攒够可在活动页兑换会员、外卖券等权益。
+
+```bash
+python3 cmcc_seed.py --config config2.json            # 签到 + 做任务 + 领阳光值
+python3 cmcc_seed.py --config config2.json --dry-run  # 只查签到/任务/待领阳光值
+python3 cmcc_sign.py --seed --config config2.json     # 挂在主签到脚本后一起跑
+```
+
+配置里需要有 `coc3_phone`：在 App 打开活动页后，从任意
+`dev.coc.10086.cn` 请求头复制 `phone` 值填入（长期有效，不需要 cookie）。
+未配置时脚本会直接跳过，不影响其它任务。每次运行会提示该凭证已存活多久；
+失效时会提示存活时长并推送，重新抓包更新 `coc3_phone` 即可。
+
+自动完成：每日签到、3 个每周浏览任务、每日看直播、每日分享，以及任务
+完成后的阳光值领取；订购会员、邀请好友、关注公众号/微博不代做。
 
 ## 假期限时秒杀 `cmcc_seckill.py`
 
