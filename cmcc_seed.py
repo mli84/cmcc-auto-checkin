@@ -447,15 +447,11 @@ def run(config_path: str, dry_run: bool = False, no_sign: bool = False,
     task_lines, done = run_tasks(api, dry_run)
     claim_lines, got = (["跳过领取"] if no_claim
                         else claim_all(api, dry_run))
-    if not dry_run:
-        time.sleep(3)  # 阳光值入账有延迟，先等几秒
     growth_after = api.growth()
-    # 领取数已到但余额还没跟上（签到/任务入账延迟）：再等一轮复查
-    if (not dry_run and got and growth_before is not None
-            and growth_after is not None
-            and growth_after < growth_before + got):
-        time.sleep(10)
-        growth_after = api.growth()
+    # 入账有延迟时不再等待：任务/领取已经完成，余额以活动页稍后刷新为准
+    lagged = (not dry_run and got and growth_before is not None
+              and growth_after is not None
+              and growth_after < growth_before + got)
 
     summary = "\n".join([
         f"[凭证] {token_line}",
@@ -464,7 +460,8 @@ def run(config_path: str, dry_run: bool = False, no_sign: bool = False,
         *claim_lines,
         f"[阳光值] {growth_before if growth_before is not None else '?'}"
         f" → {growth_after if growth_after is not None else '?'}"
-        + (f"（本次领取 +{got}）" if got else ""),
+        + (f"（本次领取 +{got}）" if got else "")
+        + ("（入账延迟，请以活动页余额为准）" if lagged else ""),
     ])
     log.info("\n%s", summary)
     if notify_result and not dry_run:
