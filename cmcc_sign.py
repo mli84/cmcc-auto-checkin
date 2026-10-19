@@ -409,7 +409,8 @@ def notify(cfg: Config, title: str, detail: str):
 # ---------------------------------------------------------------- 主流程
 
 def run(cfg: Config, dry_run: bool, claim: bool = True, tasks: bool = False,
-        games: bool = False, wed: bool = False, seed: bool = False) -> int:
+        games: bool = False, wed: bool = False, seed: bool = False,
+        gold: bool = False) -> int:
     today = datetime.now().strftime("%Y%m%d")
 
     # 重建会话的兜底：第一次失败若是会话问题，重建后再试一次
@@ -541,6 +542,22 @@ def run(cfg: Config, dry_run: bool, claim: bool = True, tasks: bool = False,
                 seed_failed = True
                 lines.append(f"[AI豆苗] 失败: {e}")
 
+    # AI豆兑换话费券（可选模块 cmcc_gold.py，与主脚本共用会话）
+    if gold:
+        try:
+            import cmcc_gold
+        except ImportError:
+            lines.append("[AI豆兑换] 未找到 cmcc_gold.py，已跳过")
+        else:
+            try:
+                _, detail = cmcc_gold.run(
+                    cfg.config_path or "config.json",
+                    dry_run=dry_run, notify_result=False)
+                for line in detail.splitlines():
+                    lines.append(f"[AI豆兑换] {line}")
+            except Exception as e:
+                lines.append(f"[AI豆兑换] 失败: {e}")
+
     summary = "\n".join(lines)
     log.info("\n%s", summary)
     notify(cfg, "移动签到通知", f"{summary}\n手机尾号 {cfg.phone[-4:]}")
@@ -562,6 +579,8 @@ def main() -> int:
                         help="顺带跑周三充值日拼图抽奖（需 cmcc_wed.py）")
     parser.add_argument("--seed", action="store_true",
                         help="顺带跑 AI豆苗养成记签到/任务/领阳光值（需 cmcc_seed.py 与 coc3_ticket）")
+    parser.add_argument("--gold", action="store_true",
+                        help="顺带兑换签到专属AI豆话费券（需 cmcc_gold.py，配 --tasks 攒豆后自动兑）")
     parser.add_argument("--delay", type=int, default=0, metavar="N", help="启动前随机延迟 0~N 秒")
     args = parser.parse_args()
 
@@ -584,7 +603,7 @@ def main() -> int:
     try:
         return run(cfg, dry_run=args.dry_run, claim=args.claim,
                    tasks=args.tasks, games=args.games, wed=args.wed,
-                   seed=args.seed)
+                   seed=args.seed, gold=args.gold)
     except Exception as e:
         log.exception("执行失败: %s", e)
         notify(cfg, "移动签到异常", f"{e}\n手机尾号 {cfg.phone[-4:] if cfg.phone else '????'}")

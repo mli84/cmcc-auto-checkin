@@ -10,6 +10,7 @@
 | `cmcc_wed.py` | 周三充值日：每日任务 + 抽拼图 + 集齐自动领券 + 场次秒杀 | 每天 1 次（秒杀仅周三） |
 | `cmcc_rate.py` | 评价有礼：每周满分评价得评价币，攒够自动兑换话费/流量券 | 每周 1 次 |
 | `cmcc_seed.py` | AI豆苗养成记：签到、浏览/直播/分享任务、领取阳光值 | 每天 1 次 |
+| `cmcc_gold.py` | 签到专属AI豆兑换话费券（5元→2元→1.5元→1元 顶格兑） | 每天 1 次 |
 | `cmcc_seckill.py` | 假期限时秒杀（如 5 元话费加赠券） | 仅活动期 |
 | `cmcc_fee.py` | 话费余额查询并推送 | 随意 |
 | `liaoning/liaoning.py` | [辽宁移动专属活动](docs/liaoning.md)（充值先领券抽奖） | 辽宁号码每天 1 次 |
@@ -140,6 +141,16 @@ python3 cmcc_sign.py --seed --config config2.json     # 挂在主签到脚本后
 注意要用目标账号自己抓的 ticket，配置里的 `app_token` 是另一集群（NingBo）的旧票据，不能充当。脚本每次运行自动用 ticket 换新 token，失效时推送提醒重抓；`python3 cmcc_seed.py --check-auth` 可随时验证 ticket 是否有效。未配置时脚本直接跳过，不影响其它任务。
 
 自动完成：每日签到、3 个每周浏览任务、每日看直播、每日分享，以及任务完成后的阳光值领取；订购会员、邀请好友、关注公众号/微博不代做。
+
+## AI豆兑换话费券 `cmcc_gold.py`
+
+签到有礼页「签到专属AI豆兑换」商城：话费券每日限量、先到先得，AI豆 1:1 抵扣月度话费额度。脚本按面额从高到低顶格兑换：**5元 → 2元 → 1.5元 → 1元话费券**，兑完一张重取余额继续匹配；0.5 元档与「充值加赠券」不兑。每件商品每期限兑一次，AI豆不足/当日抢光/已兑过均安全跳过，重复运行幂等；只有兑到券（或异常失败）才推送。
+
+```bash
+python3 cmcc_gold.py --config config.json         # 自动顶格兑换并推送
+python3 cmcc_gold.py --config config.json --dry-run  # 只查余额/各档库存
+python3 cmcc_sign.py --tasks --gold               # 先做 AI豆任务攒豆，再自动兑换
+```
 
 ## 假期限时秒杀 `cmcc_seckill.py`
 
