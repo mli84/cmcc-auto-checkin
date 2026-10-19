@@ -58,6 +58,8 @@ python3 cmcc_sign.py --dry-run          # 或先只查状态，不做任何操�
 
 多账号：复制 `config.json` 为 `config2.json` 填入另一号码，运行时加 `--config config2.json`。凭证缓存按尾号自动隔离，不会串号。
 
+版本 tag：config 结构变更打 patch 版（v1.0.x），新增活动脚本打 minor 版（v1.x.0），均为附注 tag 并随提交推送。
+
 ## 每日主脚本 `cmcc_sign.py`
 
 默认运行做两件事：**每日签到** 和 **自动领取累计/连签奖励**。AI豆任务、拓展活动、AI豆苗养成记、周三充值日通过参数选择，可任意组合：
