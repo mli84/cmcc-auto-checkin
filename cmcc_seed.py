@@ -17,10 +17,12 @@
   POST /cmpp-manage/task/visit                          浏览/直播类任务完成上报
   POST /cmpp-manage/task/share                          分享类任务完成上报
 
-鉴权：活动接口只认请求头 `phone`——权益市场统一登录（userLoginV2）下发的
-      加密手机号 token，不是用手机号现场算出来的。App 内打开活动页后，
-      从任意 dev.coc.10086.cn 请求头复制 `phone` 值填入配置即可，长期有效；
-      不需要 cookie，也不需要 wx.10086.cn 的 jwt。
+鉴权：活动接口只认请求头 `phone`——userLoginV2 用大网 SSO ticket 现签的
+      短效 token。配置 `coc3_ticket`（长效）：Proxyman 过滤
+      cache_server/api/cache，任选一条 client.app.coc.10086.cn 请求，
+      整串复制其 Cookie 头（JSESSIONID=...; UID=...;
+      Comment=SessionServer-unity; ...）。脚本每次运行先拿它换新 token；
+      失效时推送提醒重新抓包，也可用 --check-auth 随时探测。
 
 可自动完成：
   - 每日签到（+10 阳光值，按本地状态每天一次）；
@@ -59,6 +61,7 @@ from cmcc_sign import notify
 
 ROOT = Path(__file__).resolve().parent
 BASE = "https://dev.coc.10086.cn/coc3/coc3-market-activity"
+LOGIN_URL = "https://dev.coc.10086.cn/coc3/gr/login/ssoRights/userLoginV2"
 PAGE_URL = ("https://dev.coc.10086.cn/coc3/canvas/rightsmarket-h5-canvas"
             "/online/2026dmycj?pageRecorded=true")
 PAGE_KEY = "2026dmycj"
@@ -83,14 +86,14 @@ log = logging.getLogger("cmcc_seed")
 
 
 class SeedConfig:
-    """只取本脚本需要的字段；coc3_phone 缺失时脚本整体跳过。"""
+    """只取本脚本需要的字段；coc3_ticket 缺失时脚本整体跳过。"""
 
     def __init__(self, path: str):
         raw = json.loads(Path(path).read_text(encoding="utf-8"))
         self.path = Path(path)
         self.phone = str(raw.get("phone") or "")
-        self.coc3_phone = str(os.environ.get("CMCC_COC3_PHONE")
-                              or raw.get("coc3_phone") or "")
+        self.coc3_ticket = str(os.environ.get("CMCC_COC3_TICKET")
+                               or raw.get("coc3_ticket") or "")
         self.coc3_channel = str(os.environ.get("CMCC_COC3_CHANNEL")
                                 or raw.get("coc3_channel") or DEFAULT_CHANNEL)
         self.coc3_wtac = str(raw.get("coc3_wtac") or DEFAULT_WTAC)
@@ -103,7 +106,7 @@ class SeedConfig:
 
 
 class SeedAPI:
-    """AI豆苗活动接口；phone 头即凭证，不落任何票据。"""
+    """AI豆苗活动接口。每次运行用 coc3_ticket 现签 token 作 phone 头；不落任何票据。"""
 
     def __init__(self, cfg: SeedConfig):
         self.cfg = cfg
@@ -115,9 +118,33 @@ class SeedAPI:
             "content-type": "application/json;charset=utf-8",
             "origin": "https://dev.coc.10086.cn",
             "referer": PAGE_URL,
-            "phone": cfg.coc3_phone,
             "accept-language": "zh-CN,zh-Hans;q=0.9",
         })
+        self.token_from_ticket = False
+        if cfg.coc3_ticket:
+            self.token_from_ticket = self.refresh_by_ticket()
+
+    def refresh_by_ticket(self) -> bool:
+        """大网 SSO ticket → userLoginV2 换新 token 作 phone 头。"""
+        ticket = self.cfg.coc3_ticket
+        body = {"ticket": ticket, "ticketType": 11, "businessType": "RIGHTS_MARKET",
+                "wxoaType": "", "m1": "", "m2": "", "s1": "", "s2": "", "from": "",
+                "jsid": ticket}
+        try:
+            r = self.s.post(LOGIN_URL, json=body, timeout=30)
+            resp = r.json()
+        except Exception as e:
+            log.warning("coc3_ticket 换 token 请求失败: %s", e)
+            return False
+        token = (resp.get("data") or {}).get("token")
+        if not token:
+            log.warning("coc3_ticket 换 token 未成功（ticket 可能已失效）: %s",
+                        json.dumps(resp, ensure_ascii=False)[:150])
+            return False
+        self.s.headers["phone"] = token
+        log.info("coc3_ticket 换新 token 成功（账号 %s）",
+                 (resp.get("data") or {}).get("mobileMask") or "未知")
+        return True
 
     def post(self, path: str, body: dict) -> dict:
         """统一 POST；网关异常按失败结构返回，不抛异常。"""
@@ -212,14 +239,16 @@ def save_state(cfg: SeedConfig, state: dict):
         pass
 
 
-def track_token(cfg: SeedConfig, state: dict, persist: bool = True) -> tuple[float, bool]:
-    """按 jwt 缓存的 first_seen 方式跟踪 coc3_phone 存活时间。
+def track_token(cfg: SeedConfig, state: dict, persist: bool = True,
+                value: str | None = None) -> tuple[float, bool]:
+    """按 jwt 缓存的 first_seen 方式跟踪凭证存活时间。
 
-    只存 token 的 sha256，不落明文；token 变化时重置起点。
+    只存凭证的 sha256，不落明文；凭证变化时重置起点。
     返回 (已存活秒数, 是否为新凭证)。
     """
     now = time.time()
-    fp = hashlib.sha256(cfg.coc3_phone.encode("utf-8")).hexdigest()
+    value = value if value is not None else cfg.coc3_ticket
+    fp = hashlib.sha256(value.encode("utf-8")).hexdigest()
     if state.get("coc3_phone_hash") != fp:
         state.update(coc3_phone_hash=fp, coc3_phone_first_seen=now,
                      coc3_phone_last_ok=None)
@@ -419,21 +448,20 @@ def run(config_path: str, dry_run: bool = False, no_sign: bool = False,
     notify_result=False 时由调用方（cmcc_sign.py）统一推送，避免重复通知。
     """
     cfg = SeedConfig(config_path)
-    if not cfg.coc3_phone:
-        msg = "未配置 coc3_phone，跳过 AI豆苗养成记"
+    if not cfg.coc3_ticket:
+        msg = "未配置 coc3_ticket，跳过 AI豆苗养成记"
         log.info(msg)
         return 0, msg
 
     state = load_state(cfg)
-    age_sec, new_token = track_token(cfg, state, persist=not dry_run)
     api = SeedAPI(cfg)
+    age_sec, new_ticket = track_token(cfg, state, persist=not dry_run,
+                                      value=cfg.coc3_ticket)
     auth_err = api.auth_check()
     if auth_err:
-        last_ok = state.get("coc3_phone_last_ok")
-        extra = (f"，上次成功 {fmt_age(time.time() - float(last_ok))} 前"
-                 if last_ok else "")
-        msg = (f"coc3_phone 已失效（{auth_err}），已存活 {fmt_age(age_sec)}"
-               f"{extra}，请重新抓包更新")
+        msg = (f"coc3_ticket 已失效（{auth_err}），已服役 {fmt_age(age_sec)}。"
+               f"重新抓包：Proxyman 过滤 cache_server/api/cache，任选一条请求"
+               f"复制 Cookie 头整串，更新 coc3_ticket")
         log.warning(msg)
         if notify_result:
             notify(cfg, "AI豆苗养成记", f"{msg}\n手机尾号 {cfg.phone[-4:]}")
@@ -441,8 +469,7 @@ def run(config_path: str, dry_run: bool = False, no_sign: bool = False,
     if not dry_run:
         state["coc3_phone_last_ok"] = time.time()
         save_state(cfg, state)
-    token_line = (f"coc3_phone 已存活 {fmt_age(age_sec)}"
-                  + ("（新凭证，从本次开始计时）" if new_token else ""))
+    token_line = f"coc3_ticket 已服役 {fmt_age(age_sec)}（token 每次现签）"
     log.info("[凭证] %s", token_line)
     growth_before = api.growth()
 
@@ -479,12 +506,45 @@ def main() -> int:
                     help="默认根目录 config.json")
     ap.add_argument("--dry-run", action="store_true", help="只查状态，不做写操作")
     ap.add_argument("--no-sign", action="store_true", help="跳过签到")
+def check_auth(config_path: str) -> int:
+    """只验证 coc3_ticket（换签 + 活动接口探测），不执行任何任务。"""
+    cfg = SeedConfig(config_path)
+    if not cfg.coc3_ticket:
+        log.info("未配置 coc3_ticket")
+        return 1
+    state = load_state(cfg)
+    api = SeedAPI(cfg)
+    age, new = track_token(cfg, state, persist=True, value=cfg.coc3_ticket)
+    if not api.token_from_ticket:
+        log.warning("coc3_ticket 已失效（换签失败），已服役 %s", fmt_age(age))
+        return 1
+    log.info("coc3_ticket 有效，已服役 %s%s", fmt_age(age),
+             "（首次使用，从现在开始计时）" if new else "")
+    err = api.auth_check()
+    if err:
+        log.warning("活动接口探测失败: %s", err)
+        return 1
+    g = api.growth()
+    log.info("活动接口探测通过，当前阳光值 %s", g if g is not None else "?")
+    return 0
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description="AI豆苗养成记自动任务")
+    ap.add_argument("--config", default=str(ROOT / "config.json"),
+                    help="默认根目录 config.json")
+    ap.add_argument("--dry-run", action="store_true", help="只查状态，不做写操作")
+    ap.add_argument("--no-sign", action="store_true", help="跳过签到")
     ap.add_argument("--no-claim", action="store_true", help="跳过领取阳光值")
+    ap.add_argument("--check-auth", action="store_true",
+                    help="只验证 coc3_ticket 是否有效，不执行任务")
     args = ap.parse_args()
 
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s [%(levelname)s] %(message)s",
                         datefmt="%H:%M:%S")
+    if args.check_auth:
+        return check_auth(args.config)
     rc, _ = run(args.config, dry_run=args.dry_run, no_sign=args.no_sign,
                 no_claim=args.no_claim)
     return rc

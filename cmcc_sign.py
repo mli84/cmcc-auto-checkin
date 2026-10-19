@@ -26,7 +26,7 @@
   python3 cmcc_sign.py --config config.json            # 常规签到（自动领累计/连签奖励）
   python3 cmcc_sign.py --dry-run                       # 只查状态，同时报「可领未领」奖励
   python3 cmcc_sign.py --no-claim                      # 只签到，不领奖
-  python3 cmcc_sign.py --seed                          # 顺带跑 AI豆苗养成记（需 coc3_phone）
+  python3 cmcc_sign.py --seed                          # 顺带跑 AI豆苗养成记（需 coc3_ticket）
   python3 cmcc_sign.py --delay 600                     # 启动前随机延迟 0~600 秒（防风控）
 
 退出码：0 = 签到成功或今日已签；1 = 失败（便于 CI 判断）
@@ -131,7 +131,7 @@ class Config:
         self.channel_id = env.get("CMCC_CHANNEL_ID", file_cfg.get("channel_id", "P00000109876"))
         self.serverchan_sendkey = env.get("CMCC_SERVERCHAN_SENDKEY", file_cfg.get("serverchan_sendkey", ""))
         self.bark_url = env.get("CMCC_BARK_URL", file_cfg.get("bark_url", ""))
-        # 供 --seed 转交 cmcc_seed.py 读取同一份配置（含 coc3_phone）
+        # 供 --seed 转交 cmcc_seed.py 读取同一份配置（含 coc3_ticket）
         self.config_path = str(path) if path else ""
 
     @property
@@ -561,7 +561,7 @@ def main() -> int:
     parser.add_argument("--wed", action="store_true",
                         help="顺带跑周三充值日拼图抽奖（需 cmcc_wed.py）")
     parser.add_argument("--seed", action="store_true",
-                        help="顺带跑 AI豆苗养成记签到/任务/领阳光值（需 cmcc_seed.py 与 coc3_phone）")
+                        help="顺带跑 AI豆苗养成记签到/任务/领阳光值（需 cmcc_seed.py 与 coc3_ticket）")
     parser.add_argument("--delay", type=int, default=0, metavar="N", help="启动前随机延迟 0~N 秒")
     args = parser.parse_args()
 
