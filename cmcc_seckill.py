@@ -17,6 +17,14 @@ redeem 响应判定（前端源码还原）：
   status=PRIZE_NO_STOCK   券抢完（停手）
   status=NOT_TIME_IN      未开抢（继续，密集重试）
   status=PRIZE_LIMIT_*    限次（停手）
+  status=ZONE_TODAY_COMPLETE  今日已中过（停手，按已抢到处理）
+
+已抢到识别：secConfig 场次的 prize.status=="1" 表示该账号本场已中奖
+（前端按钮态「去使用」），开抢前发现直接跳过，不打 redeem。
+
+库存盯盘：secConfig 每个场次带 prize.leaveStock。选定场次库存为 0 直接不抢；
+抢的过程每 2 秒核对一次，收尾再核对一次——没货立刻收手，避免对着空库存
+狂打 redeem 触发风控。默认只抢 6 发（--max-attempts 可调）。
 
 用法：
   python3 cmcc_seckill.py --dry-run      # 只查场次/校时/资格，不抢
@@ -55,6 +63,7 @@ REDEEM_URL = f"{API_MARK}/markSeckill/redeem"
 # 触达即终态的 redeem status：不再浪费请求
 STOP_STATUSES = {
     "PRIZE_NO_STOCK": "券已抢完",
+    "ZONE_TODAY_COMPLETE": "今日已完成中奖（无需再抢）",
     "PRIZE_LIMIT_DAY": "当日中奖次数已用完",
     "PRIZE_LIMIT_MONTH": "当月中奖次数已用完",
     "PRIZE_RESTRIC_LIMIT": "活动期间中奖次数已达上限",
@@ -94,6 +103,31 @@ def server_now_ms(s, referer: str) -> int:
     raise RuntimeError("无法获取服务器时间（sysTime 与 Date 响应头均不可用）")
 
 
+def sec_config_zones(s, referer: str) -> tuple[list | None, dict]:
+    """拉秒杀场次。风控/异常时 data 会退化为字符串，这里只判类型不硬解。"""
+    resp = api_post(s, referer, SECCONFIG_URL)
+    data = resp.get("data")
+    skd = data.get("secKillData") if isinstance(data, dict) else None
+    zones = skd.get("secKillZones") if isinstance(skd, dict) else None
+    return (zones if isinstance(zones, list) else None), resp
+
+
+def query_stock(s, referer: str, sec_id: str) -> float | None:
+    """指定场次当前剩余库存；查询失败/字段异常一律返回 None（未知）。"""
+    try:
+        zones, _ = sec_config_zones(s, referer)
+    except Exception as e:
+        log.warning("库存查询失败: %s", e)
+        return None
+    for z in zones or []:
+        if str(z.get("id")) == str(sec_id):
+            try:
+                return float((z.get("prize") or {}).get("leaveStock"))
+            except (TypeError, ValueError):
+                return None
+    return None
+
+
 def pick_zone(zones: list, now_ms: int) -> tuple[dict | None, bool]:
     """选出当前进行中或下一场即将开始的场次，返回 (zone, 是否已开抢)。"""
     for z in zones:
@@ -107,7 +141,8 @@ def pick_zone(zones: list, now_ms: int) -> tuple[dict | None, bool]:
 def ensure_eligible(s, referer: str, cfg: Config) -> bool:
     """秒杀资格 = 完成当日签到。未签则先走同活动的 domark 补签。"""
     resp = api_post(s, referer, TODAY_MARK_URL)
-    if (resp.get("data") or {}).get("markStatus") == "marked":
+    data = resp.get("data")
+    if isinstance(data, dict) and data.get("markStatus") == "marked":
         return True
     log.info("今日未签到，先补签获取秒杀资格...")
     try:
@@ -117,7 +152,8 @@ def ensure_eligible(s, referer: str, cfg: Config) -> bool:
     except Exception as e:
         log.warning("补签请求失败: %s", e)
     resp = api_post(s, referer, TODAY_MARK_URL)
-    return (resp.get("data") or {}).get("markStatus") == "marked"
+    data = resp.get("data")
+    return isinstance(data, dict) and data.get("markStatus") == "marked"
 
 
 def wait_until(target: float, s, referer: str):
@@ -137,11 +173,13 @@ def wait_until(target: float, s, referer: str):
 
 def fire_redeem(s, referer: str, zone: dict, interval: float,
                 max_attempts: int, deadline_srv_ms: int, offset_ms: float) -> tuple[dict | None, str]:
-    """开抢主循环。返回 (成功时的响应, 结束原因)。"""
+    """开抢主循环。被拒后核对 leaveStock，没货立刻停手。返回 (成功时的响应, 结束原因)。"""
     payload = {"secId": str(zone["id"]), "prizeId": str(zone["prize"]["id"])}
     log.info("开始抢购: %s (secId=%s prizeId=%s)",
              zone["prize"]["name"], payload["secId"], payload["prizeId"])
 
+    # 开场几秒专心出手，2 秒内不插库存查询；之后每次被拒间隔 2 秒核对一次
+    last_stock_check = time.time()
     for attempt in range(1, max_attempts + 1):
         if (time.time() + offset_ms) * 1000 > deadline_srv_ms:
             return None, "场次窗口已结束"
@@ -159,9 +197,22 @@ def fire_redeem(s, referer: str, zone: dict, interval: float,
         if status in STOP_STATUSES:
             return resp, status
         # NOT_TIME_IN（提前量打早了）与其他未知错误：密集重试直到开抢/窗口结束
+        now = time.time()
+        if now - last_stock_check >= 2.0:
+            last_stock_check = now
+            stock = query_stock(s, referer, payload["secId"])
+            log.info("库存核对: %s", "未知" if stock is None else f"剩 {stock:g}")
+            if stock == 0:
+                return None, "库存已抢完（leaveStock=0），停手"
         time.sleep(0.05 if status == "NOT_TIME_IN" else interval)
 
-    return None, f"连续 {max_attempts} 发未中"
+    # 收尾再核对一次，区分“没抢到”和“根本没货”
+    stock = query_stock(s, referer, payload["secId"])
+    if stock == 0:
+        return None, "库存已抢完（leaveStock=0）"
+    if stock is None:
+        return None, f"连续 {max_attempts} 发未中（库存未知）"
+    return None, f"连续 {max_attempts} 发未中（剩余库存 {stock:g}）"
 
 
 def run(cfg: Config, dry_run: bool, once: bool, at: str | None,
@@ -182,20 +233,20 @@ def run(cfg: Config, dry_run: bool, once: bool, at: str | None,
              datetime.fromtimestamp(srv_ms / 1000, TZ_CN).strftime("%m-%d %H:%M:%S.%f")[:-3],
              offset_ms)
 
-    cfg_resp = api_post(s, referer, SECCONFIG_URL)
-    zones = ((cfg_resp.get("data") or {}).get("secKillData") or {}).get("secKillZones") or []
+    zones, cfg_resp = sec_config_zones(s, referer)
     if not zones:
-        raise RuntimeError("secConfig 未返回任何场次（活动未配置或已结束）")
+        raise RuntimeError("secConfig 未返回场次或响应异常（活动未配置/已结束/风控）: "
+                           + json.dumps(cfg_resp, ensure_ascii=False)[:200])
     log.info("共 %d 个场次:", len(zones))
     for z in zones:
         st = datetime.fromtimestamp(int(z["startTime"]) / 1000, TZ_CN)
         et = datetime.fromtimestamp(int(z["endTime"]) / 1000, TZ_CN)
-        log.info("  场次%s %s ~ %s  %s (prizeId=%s)",
+        prize = z.get("prize") or {}
+        stock = prize.get("leaveStock")
+        stock_txt = "未知" if stock is None else (f"剩 {stock:g}" if stock else "已抢完")
+        log.info("  场次%s %s ~ %s  %s (prizeId=%s, 库存%s)",
                  z["id"], st.strftime("%m-%d %H:%M:%S"), et.strftime("%H:%M:%S"),
-                 z["prize"]["name"], z["prize"]["id"])
-
-    eligible = ensure_eligible(s, referer, cfg)
-    log.info("秒杀资格（当日签到）: %s", "已具备" if eligible else "未获取！")
+                 prize.get("name"), prize.get("id"), stock_txt)
 
     zone, active = pick_zone(zones, srv_ms)
     if zone is None:
@@ -204,6 +255,25 @@ def run(cfg: Config, dry_run: bool, once: bool, at: str | None,
     st = datetime.fromtimestamp(start_srv_ms / 1000, TZ_CN)
     log.info("选定场次%s：%s 开抢（%s）", zone["id"], st.strftime("%m-%d %H:%M:%S"),
              "进行中" if active else f"距开始 {(start_srv_ms - srv_ms) / 1000:.0f} 秒")
+
+    # 已抢到优先于库存判断（前端「去使用」>「已抢完」）：本场中过就不再打 redeem
+    if str((zone.get("prize") or {}).get("status")) == "1":
+        detail = (f"{zone['prize']['name']}\n场次 {st.strftime('%m-%d %H:%M')}，"
+                  f"今日已抢到，无需重复抢购\n手机尾号 {cfg.phone[-4:]}")
+        log.info("本场已抢到（prize.status=1，前端按钮态「去使用」），无需再抢")
+        notify(cfg, "移动秒杀：今日已抢到", detail)
+        return 0
+
+    # 开抢前先看库存：没货就不补签也不打 redeem，白费请求还容易被风控
+    if (zone.get("prize") or {}).get("leaveStock") == 0:
+        reason = "选定场次库存已为 0（已被抢完），不发起抢购"
+        log.warning("秒杀未成功: %s", reason)
+        notify(cfg, "移动秒杀未成功",
+               f"{reason}\n场次 {st.strftime('%m-%d %H:%M')} {zone['prize']['name']}\n手机尾号 {cfg.phone[-4:]}")
+        return 1
+
+    eligible = ensure_eligible(s, referer, cfg)
+    log.info("秒杀资格（当日签到）: %s", "已具备" if eligible else "未获取！")
 
     if dry_run:
         log.info("[dry-run] 到此为止，不执行抢购")
@@ -242,6 +312,13 @@ def run(cfg: Config, dry_run: bool, once: bool, at: str | None,
         notify(cfg, "移动秒杀成功 🎉", detail)
         return 0
 
+    if resp is not None and resp.get("status") == "ZONE_TODAY_COMPLETE":
+        detail = (f"{zone['prize']['name']}\n场次 {st.strftime('%m-%d %H:%M')}，"
+                  f"今日已完成中奖，无需重复抢购\n手机尾号 {cfg.phone[-4:]}")
+        log.info("今日已完成中奖，无需重复抢购")
+        notify(cfg, "移动秒杀：今日已抢到", detail)
+        return 0
+
     detail = f"{reason}\n场次 {st.strftime('%m-%d %H:%M')} {zone['prize']['name']}\n手机尾号 {cfg.phone[-4:]}"
     log.warning("秒杀未成功: %s", reason)
     notify(cfg, "移动秒杀未成功", detail)
@@ -256,7 +333,8 @@ def main() -> int:
     parser.add_argument("--at", metavar="HH:MM[:SS]", help="手动指定开抢时刻（北京时间，调试用）")
     parser.add_argument("--interval", type=float, default=0.35, metavar="SEC", help="重试间隔秒（默认 0.35）")
     parser.add_argument("--lead", type=float, default=0.4, metavar="SEC", help="提前开火秒数，抵消网络延迟（默认 0.4）")
-    parser.add_argument("--max-attempts", type=int, default=120, metavar="N", help="最大尝试次数（默认 120）")
+    parser.add_argument("--max-attempts", type=int, default=6, metavar="N",
+                        help="最大尝试次数（默认 6；抢的过程会盯库存，没货提前停）")
     args = parser.parse_args()
 
     logging.basicConfig(
