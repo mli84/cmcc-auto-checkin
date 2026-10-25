@@ -1,0 +1,54 @@
+name: cmcc
+
+# 两条定时任务：
+#   每日签到（UTC 00:23 = 北京 08:23）
+#   每 5 分钟只读心跳，顺延会话 TTL（app_token 失效后 1~3.5 小时就死，见 README）
+# 凭证全部走 Secrets，仓库里不落任何明文。
+on:
+  schedule:
+    - cron: "23 0 * * *"
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+# 心跳与签到串行，避免同一分钟两次运行互踢会话
+concurrency:
+  group: cmcc
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: 判定运行模式
+        id: mode
+        run: |
+          if [ "${{ github.event.schedule }}" = "23 0 * * *" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "args=" >> "$GITHUB_OUTPUT"
+            echo "模式: 签到 + 领奖"
+          else
+            echo "args=--dry-run" >> "$GITHUB_OUTPUT"
+            echo "模式: 心跳（只读，不签到）"
+          fi
+
+      - name: 执行
+        run: python cmcc_sign.py ${{ steps.mode.outputs.args }}
+        env:
+          CMCC_APP_TOKEN: ${{ secrets.CMCC_APP_TOKEN }}
+          CMCC_PHONE: ${{ secrets.CMCC_PHONE }}
+          CMCC_PROVINCE_CODE: ${{ secrets.CMCC_PROVINCE_CODE }}
+          CMCC_CITY_CODE: ${{ secrets.CMCC_CITY_CODE }}
+          CMCC_ACTIVITY_ID: ${{ secrets.CMCC_ACTIVITY_ID }}
+          CMCC_CHANNEL_ID: ${{ secrets.CMCC_CHANNEL_ID }}
+          CMCC_COC3_TICKET: ${{ secrets.CMCC_COC3_TICKET }}
+          CMCC_BARK_URL: ${{ secrets.CMCC_BARK_URL }}
+          CMCC_SERVERCHAN_SENDKEY: ${{ secrets.CMCC_SERVERCHAN_SENDKEY }}
