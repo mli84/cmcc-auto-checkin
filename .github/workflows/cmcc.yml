@@ -54,12 +54,10 @@ jobs:
       - name: 执行
         run: python cmcc_sign.py ${{ steps.mode.outputs.args }}
         env:
+          # 只传必需项：代码里 env.get(key, 默认值) 无法区分「未设置」与「空串」，
+          # 传空串会把 activity_id/channel_id 的默认值覆盖成空，导致活动页 404。
           CMCC_APP_TOKEN: ${{ secrets.CMCC_APP_TOKEN }}
           CMCC_PHONE: ${{ secrets.CMCC_PHONE }}
           CMCC_PROVINCE_CODE: ${{ secrets.CMCC_PROVINCE_CODE }}
           CMCC_CITY_CODE: ${{ secrets.CMCC_CITY_CODE }}
-          CMCC_ACTIVITY_ID: ${{ secrets.CMCC_ACTIVITY_ID }}
-          CMCC_CHANNEL_ID: ${{ secrets.CMCC_CHANNEL_ID }}
-          CMCC_COC3_TICKET: ${{ secrets.CMCC_COC3_TICKET }}
           CMCC_BARK_URL: ${{ secrets.CMCC_BARK_URL }}
-          CMCC_SERVERCHAN_SENDKEY: ${{ secrets.CMCC_SERVERCHAN_SENDKEY }}
