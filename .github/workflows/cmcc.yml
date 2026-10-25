@@ -40,6 +40,17 @@ jobs:
             echo "模式: 心跳（只读，不签到）"
           fi
 
+      - name: 凭证预检
+        env:
+          CMCC_APP_TOKEN: ${{ secrets.CMCC_APP_TOKEN }}
+          CMCC_PHONE: ${{ secrets.CMCC_PHONE }}
+        run: |
+          if [ -z "$CMCC_APP_TOKEN" ] || [ -z "$CMCC_PHONE" ]; then
+            echo "::error::缺少 Secret：请在 Settings → Secrets and variables → Actions 配置 CMCC_APP_TOKEN 与 CMCC_PHONE"
+            exit 1
+          fi
+          echo "凭证已配置：token ${#CMCC_APP_TOKEN} 字符，手机尾号 ${CMCC_PHONE: -4}"
+
       - name: 执行
         run: python cmcc_sign.py ${{ steps.mode.outputs.args }}
         env:
