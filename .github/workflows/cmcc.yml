@@ -55,7 +55,7 @@ jobs:
   sign:
     if: github.event_name == 'workflow_dispatch' || github.event.schedule == '23 0 * * *'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -70,7 +70,7 @@ jobs:
             exit 1
           fi
           echo "凭证已配置：token ${#CMCC_APP_TOKEN} 字符，手机尾号 ${CMCC_PHONE: -4}"
-      - run: python cmcc_sign.py --tasks --games --seed --wed --gold --delay 900
+      - run: python cmcc_sign.py --tasks --games --seed --wed --gold --delay 600
 
   wed:
     if: github.event.schedule == '17 1 * * 3'
