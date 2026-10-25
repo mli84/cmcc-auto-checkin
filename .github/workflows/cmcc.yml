@@ -7,8 +7,9 @@ name: cmcc
 #   17 1 * * 1   评价有礼（每周一北京 09:17，按周幂等）
 #   37 1         兑话费券（北京 09:37，在签到攒豆之后）
 #   55 23        假期限时秒杀（北京 07:55，抢 08:00 场）
-#   43 3         话费余额（北京 11:43）
 # 凭证全部走 Secrets，仓库里不落任何明文。
+# 话费余额（cmcc_fee）不在 Actions 里跑：jsessionid-cmcc 只有约 180 秒寿命，
+# 抓到后必须立刻查，无法在定时任务里无人值守。需要时本地执行。
 on:
   schedule:
     - cron: "*/5 * * * *"
@@ -17,7 +18,6 @@ on:
     - cron: "17 1 * * 1"
     - cron: "37 1 * * *"
     - cron: "55 23 * * *"
-    - cron: "43 3 * * *"
   workflow_dispatch:
 
 # 同一账号并发会互踢会话，所有任务串行
@@ -124,20 +124,4 @@ jobs:
       - run: pip install -q -r requirements.txt
       # 无场次的非活动日会退出 1，属预期，不让整个 workflow 变红
       - run: python cmcc_seckill.py
-        continue-on-error: true
-
-  fee:
-    if: github.event.schedule == '43 3 * * *'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.13"
-          cache: pip
-      - run: pip install -q -r requirements.txt
-      - run: python cmcc_fee.py
-        env:
-          CMCC_FEE_SESSION: ${{ secrets.CMCC_FEE_SESSION }}
         continue-on-error: true
