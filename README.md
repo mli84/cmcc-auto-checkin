@@ -45,12 +45,56 @@ python3 cmcc_sign.py --dry-run          # 或先只查状态，不做任何操�
 > **2026-10-22 实测：jwt 免票据续期已失效。** 服务端新签发的 jwt 下一次单独续期即返回
 > `APP登录状态已过期`；SSO 登录页已下发 `enableJwtLogin=false`、`POST /qwhdsso/jwtLogin`
 > 返回「当前接口不可用」；`jwt + JSESSIONID cookie` 同样失败。**`app_token` 因此是唯一有效
-> 凭证**，其失效后只能重新抓包。脚本仍先试 jwt（服务端若恢复即自动生效），每次多打一条
-> 「jwt 续期失败」日志属预期现象。
+> 凭证**。脚本仍先试 jwt（服务端若恢复即自动生效），每次多打一条「jwt 续期失败」日志属预期现象；
+> `app_token` 自身过期时由 `cmcc_session.py` 自动现签新会话恢复（见「自动恢复」）。
 
-`app_token` 绑定 App 原生登录会话，App 内**退出登录、切换账号或重新登录**都会使其立即失效
-（曾出现次日即失效的情况）。因此：抓包后尽量不要再动 App 的登录状态；把签到挂进定时任务并用
-Bark/Server酱 接收失败推送；收到失败推送即重新抓包（历史断签无法补回）。凭证属于账号敏感信息，只在本地使用，切勿外传。
+`app_token` 绑定 App 原生登录会话，App 内**退出登录、切换账号或重新登录**都会使其立即失效。
+不过其中的 JSESSIONID 会话**闲置约 1~3.5 小时还会被服务端回收**，报「APP登录状态已过期」——
+但这已由 `cmcc_session.py` 自动解决（见下节），**不需要人工重抓，也不需要常驻保活**。
+凭证属于账号敏感信息，只在本地使用，切勿外传。
+
+### 自动恢复（`cmcc_session.py`）
+
+**根因**：`appTokenLogin` 会校验 JSESSIONID 会话，闲置即被回收；而冷启动的
+`client.app.coc.10086.cn` / `POST /biz-orange/LN/uamonekeylogin/autoLogin`
+**根本不校验会话**——实测随机 UUID、空值都能返回 `000000` 并换发全新活会话，
+它靠请求体里的 `cellNum`（RSA 加密手机号）识别用户。
+
+因此正确做法不是保活，而是**每次运行时现签一张新会话**。`cmcc_sign.exchange_session()`
+在 `appTokenLogin` 收到过期错误时，会自动调 `autoLogin` 现签后重试一次，全自动、无需常驻进程。
+
+**首次只需抓包一次**，用于取出签名模板（`xk` + `cellNum` 等）：
+
+```bash
+python3 cmcc_session.py --har ~/Desktop/xxx.har   # 存 profile（一次即可）
+python3 cmcc_session.py --print-template          # 打印模板，供 CI 用
+python3 cmcc_session.py --refresh                 # 手动现签一张（调试用）
+python3 cmcc_session.py --show                    # 查看当前会话剩余有效期
+python3 cmcc_session.py --self-test               # 离线自检（无需抓包）
+```
+
+抓包要求：Proxyman 过滤 `uamonekeylogin`，App **冷启动**一次即可（先杀掉进程再打开）。
+profile 按手机尾号存为 `.cmcc_session_<尾号>.json`（含凭证，已被 `.gitignore` 覆盖）。
+
+**GitHub Actions 用法**：把 `--print-template` 的输出存进 Secret `CMCC_SESSION_TEMPLATE`
+即可，无需本地 profile（脚本会自动从环境变量读模板）。因 Actions 的 `*/5` cron 实测常延迟
+2 小时以上、无法当保活，而现签方案本就无需保活，两者正好契合。
+
+加密体系（2026-10-26 抓包实测，均与真实抓包逐字节对齐）：
+
+| 项 | 算法 |
+|----|------|
+| 请求体 | `AES-128-CBC(key=tVkdaRWRY0ZkV1Vr, iv=VjFSQ1ZtVkQxRTlQ)` + PKCS7 → base64 |
+| 响应体 | base64 → `AES-128-CBC(key=RYV0hCV1lV25KYVJ, iv=VjFSQ1ZtVkQxRTlQ)` |
+| `x-token` | base64(AES-CBC(`bAIgvwAuA4tbDr9d`/`9791027341711819`)(`xk_path_x-time_x-nonce`)) |
+| `xs` | `md5(url + "_" + 明文JSON + "_Leadeon/SecurityOrganization")` |
+| `x-sign` | `md5(x-token + "_" + x-time + "_" + x-nonce + "_" + 当前JSESSIONID值)` |
+
+要点：网关强校验 `x-qen`/`xs`/`xk`/`cv`（任一错误即 403）；`Cookie` 头必须存在（缺则
+`950102 x-sign错误`），但值随意；明文里的 `xk` 与 `reqBody.cellNum`
+（App 内自研 RSA 生成、无法伪造）必须沿用抓包值。`retCode=233031` 为同号短时间
+多次现签被限流（约 1 分钟窗口）；`client.app.coc.10086.cn` 需
+`OP_LEGACY_SERVER_CONNECT`，只设 `SECLEVEL=1` 会握手失败。
 
 ## 配置说明
 
@@ -210,7 +254,8 @@ macOS crontab 示例（按需取舍，路径替换为实际目录）：
 
 ## 常见问题
 
-- **什么时候需要重新抓包？** jwt 续期已于 2026-10-22 失效，现在只要推送「登录失败」就需要重新抓包（见「获取凭证」）；
+- **什么时候需要重新抓包？** 只在**首次配置**时抓一次（取 `app_token` 与会话模板）。`app_token`
+  的 JSESSIONID 会话闲置被回收时会自动现签新会话恢复（见「自动恢复」），无需重抓；
 - **推送里"领不到/已发完"是错误吗？** 不是。累计奖励和秒杀券数量有限，被领光属正常，脚本会如实标注；
 - **"今日已签到（服务端幂等）"？** 同一天重复运行脚本安全，不会重复签到或重复领奖；
 - **AI豆任务为什么有一些不完成？** 外部合作区（去快手/淘宝/支付宝等）由合作方记账，需真实进入对方 App，脚本整区跳过；充值、公众号、签到页浏览类需真实行为，失败后快速跳过并如实标注；
