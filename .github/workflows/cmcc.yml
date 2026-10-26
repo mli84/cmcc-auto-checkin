@@ -1,7 +1,8 @@
 name: cmcc
 
 # 全部 cron 用 UTC，注释里标北京时间的对应值。
-#   */5 * * * *  心跳：--dry-run 只读续命（app_token 空闲 1~3.5 小时就死，见 README）
+# 保活（心跳）不在 Actions 里跑：Actions 的 */5 cron 实测间隔常达 2 小时以上，
+# 而 app_token 空闲 1~3.5 小时就死（见 README），保活无效。改由本机 launchd 承担。
 #   23 0         每日签到 + 领奖
 #   17 1         周三充值日（北京 09:17，秒杀 08:00 场已过，只做任务与拼图）
 #   17 1 * * 1   评价有礼（每周一北京 09:17，按周幂等）
@@ -12,7 +13,6 @@ name: cmcc
 # 抓到后必须立刻查，无法在定时任务里无人值守。需要时本地执行。
 on:
   schedule:
-    - cron: "*/5 * * * *"
     - cron: "23 0 * * *"
     - cron: "17 1 * * 3"
     - cron: "17 1 * * 1"
@@ -39,19 +39,6 @@ env:
   CMCC_BARK_URL: ${{ secrets.CMCC_BARK_URL }}
 
 jobs:
-  heartbeat:
-    if: github.event_name == 'schedule' && github.event.schedule == '*/5 * * * *'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.13"
-          cache: pip
-      - run: pip install -q -r requirements.txt
-      - run: python cmcc_sign.py --dry-run
-
   sign:
     if: github.event_name == 'workflow_dispatch' || github.event.schedule == '23 0 * * *'
     runs-on: ubuntu-latest
