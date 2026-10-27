@@ -104,7 +104,7 @@ profile 按手机尾号存为 `.cmcc_session_<尾号>.json`（含凭证，已被
 |------|------|------|
 | `app_token` | App 票据，抓包获取（环境变量 `CMCC_APP_TOKEN`） | 必填 |
 | `phone` | 手机号（`CMCC_PHONE`） | 必填 |
-| `coc3_ticket` | AI豆苗养成记凭证：Proxyman 过滤 `cache_server/api/cache`，任选一条 `client.app.coc.10086.cn` 请求，整串复制其 `cookie` 请求头（`CMCC_COC3_TICKET`） | 选填 |
+| `coc3_ticket` | AI豆苗养成记凭证；**通常无需配置**，脚本会用 `cmcc_session.py` 自动现签。手工指定时填 `client.app.coc.10086.cn` 请求的整串 `cookie` 头（`CMCC_COC3_TICKET`） | 选填 |
 | `province_code` / `city_code` | 省/市编码（`CMCC_PROVINCE_CODE` / `CMCC_CITY_CODE`） | 731 / 0731 |
 | `fee_session_cookie` | 话费查询用会话，见 `cmcc_fee.py` 一节（`CMCC_FEE_SESSION`） | 选填 |
 | `serverchan_sendkey` | Server酱推送（`CMCC_SERVERCHAN_SENDKEY`） | 选填 |
@@ -188,11 +188,15 @@ python3 cmcc_seed.py --config config2.json --dry-run  # 只查签到/任务/待�
 python3 cmcc_sign.py --seed --config config2.json     # 挂在主签到脚本后一起跑
 ```
 
-配置 `coc3_ticket`（长效凭证）：Proxyman 过滤 `cache_server/api/cache`，任选一条 `client.app.coc.10086.cn` 请求，整串复制其 `cookie` 请求头（`JSESSIONID=...; UID=...; Comment=SessionServer-unity; ...`）。该接口为高频上报，App 正常使用即可抓到，无需冷启动。
+**无需配置**：脚本会自动用 `cmcc_session.py` 现签一张 `Comment=SessionServer-unity`
+会话当 ticket（实测该 cookie 可直接换到 `userLoginV2` 的 token），因此 AI豆苗不再需要抓包。
 
-![coc3_ticket 抓包位置示例](images/coc3-ticket-capture.png)
+如需手工指定（例如没有本地 profile），也可配置 `coc3_ticket`：Proxyman 过滤
+`cache_server/api/cache`，任选一条 `client.app.coc.10086.cn` 请求，整串复制其 `cookie`
+请求头（`JSESSIONID=...; UID=...; Comment=SessionServer-unity; ...`）。该接口为高频上报，
+App 正常使用即可抓到，无需冷启动。手工 ticket 会随时间失效，自动现签则不会。
 
-注意要用目标账号自己抓的 ticket，配置里的 `app_token` 是另一集群（NingBo）的旧票据，不能充当。脚本每次运行自动用 ticket 换新 token，失效时推送提醒重抓；`python3 cmcc_seed.py --check-auth` 可随时验证 ticket 是否有效。未配置时脚本直接跳过，不影响其它任务。
+`python3 cmcc_seed.py --check-auth` 可随时验证凭证是否有效。
 
 自动完成：每日签到、3 个每周浏览任务、每日看直播、每日分享，以及任务完成后的阳光值领取；订购会员、邀请好友、关注公众号/微博不代做。
 
