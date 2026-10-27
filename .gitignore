@@ -36,3 +36,4 @@ scripts/install-launchd.sh
 .omo
 .cmcc_session_*.json
 session.log
+sign2.log
