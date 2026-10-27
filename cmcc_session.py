@@ -176,14 +176,19 @@ def profile_file(phone: str) -> Path:
 
 
 def load_profile_from_har(path: str) -> dict:
-    """从 HAR 取 autoLogin 请求，还原 cookie + 明文模板 + xk。"""
+    """从 HAR 取 autoLogin 请求，还原 cookie + 明文模板 + xk。
+
+    兼容 LN 下多种 autoLogin（uamonekeylogin / uamrandcodelogin 等）：它们签名与
+    加密一致，仅路径不同。抓包时 App 可能还没拿到会话，Cookie 头为空也接受
+    （mint_cookie 本就用随机 UUID 占位）。
+    """
     har = json.loads(Path(path).read_text(encoding="utf-8"))
     candidates = []
     for entry in har["log"]["entries"]:
         req = entry["request"]
         hdr = {h["name"].lower(): h["value"] for h in req["headers"]}
         body = (req.get("postData") or {}).get("text") or ""
-        if not hdr.get("x-token") or not hdr.get("cookie") or not body:
+        if not hdr.get("x-token") or not body:
             continue
         try:
             plain = _cbc(REQ_KEY, REQ_IV, base64.b64decode(body), False).decode()
@@ -192,12 +197,11 @@ def load_profile_from_har(path: str) -> dict:
             continue
         if not template.get("xk"):
             continue
-        # 优先 autoLogin（续期接口），退而取任意 biz-orange 请求
-        is_autologin = req["url"].endswith(REFRESH_PATH)
+        is_autologin = req["url"].rstrip("/").endswith("/autoLogin")
         candidates.append((0 if is_autologin else 1, {
             "url": req["url"] if is_autologin
                    else "https://client.app.coc.10086.cn" + REFRESH_PATH,
-            "cookie": hdr["cookie"],
+            "cookie": hdr.get("cookie") or "",
             "template": template,
             "xk": template["xk"],
             "phone": str(template.get("tel") or ""),
@@ -300,7 +304,12 @@ def refresh(profile: dict, timeout: int = 25, config_path: str = "") -> dict:
     url = profile["url"]
     # 明文必须与 xs 用同一份字符串，故统一从这里重建
     plain = json.dumps(profile["template"], separators=(",", ":"), ensure_ascii=False)
-    headers = build_headers(url, plain, profile["cookie"], profile["xk"])
+    # 抓包时若 App 尚未持有会话，profile 里 cookie 为空；autoLogin 不校验来者会话，
+    # 用随机 UUID 占位即可（x-sign 需要 JSESSIONID 拼串）。
+    cookie = profile.get("cookie") or ""
+    if not re.search(r"JSESSIONID=", cookie):
+        cookie = f"JSESSIONID={uuid.uuid4()}; UID=placeholder"
+    headers = build_headers(url, plain, cookie, profile["xk"])
 
     s = requests.Session()
     s.trust_env = False  # 不继承系统代理，避免抓包工具 MITM 证书干扰
