@@ -85,6 +85,25 @@ SKIP_REASONS = {
 log = logging.getLogger("cmcc_seed")
 
 
+def _mint_ticket(phone: str) -> str | None:
+    """用 autoLogin 现签一张 SessionServer-unity 会话，直接当 coc3_ticket 用。
+
+    autoLogin 换发的 cookie 与 App 冷启动时 cache_server 请求里的那串同构
+    （含 Comment=SessionServer-unity），实测可直接换到 userLoginV2 的 token，
+    因此 AI豆苗不再需要人工抓包。无本地 profile 时返回 None，退回手工 ticket。
+    """
+    try:
+        import cmcc_session
+        profile = cmcc_session.load_profile(phone[-4:])
+    except (ImportError, SystemExit):
+        return None
+    cookie = cmcc_session.mint_cookie(profile)
+    if not cookie:
+        return None
+    log.info("已用 autoLogin 现签 coc3_ticket（无需抓包）")
+    return cookie
+
+
 class SeedConfig:
     """只取本脚本需要的字段；coc3_ticket 缺失时脚本整体跳过。"""
 
@@ -123,6 +142,11 @@ class SeedAPI:
         self.token_from_ticket = False
         if cfg.coc3_ticket:
             self.token_from_ticket = self.refresh_by_ticket()
+        if not self.token_from_ticket and cfg.phone:
+            ticket = _mint_ticket(cfg.phone)
+            if ticket:
+                cfg.coc3_ticket = ticket
+                self.token_from_ticket = self.refresh_by_ticket()
 
     def refresh_by_ticket(self) -> bool:
         """大网 SSO ticket → userLoginV2 换新 token 作 phone 头。"""
@@ -448,8 +472,10 @@ def run(config_path: str, dry_run: bool = False, no_sign: bool = False,
     notify_result=False 时由调用方（cmcc_sign.py）统一推送，避免重复通知。
     """
     cfg = SeedConfig(config_path)
+    if not cfg.coc3_ticket and cfg.phone:
+        cfg.coc3_ticket = _mint_ticket(cfg.phone) or ""
     if not cfg.coc3_ticket:
-        msg = "未配置 coc3_ticket，跳过 AI豆苗养成记"
+        msg = "未配置 coc3_ticket 且现签失败，跳过 AI豆苗养成记"
         log.info(msg)
         return 0, msg
 

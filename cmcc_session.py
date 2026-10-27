@@ -81,6 +81,11 @@ DEAD_CODES = {
 
 log = logging.getLogger("cmcc_session")
 
+# 同一进程内复用刚签到的会话：一轮脚本会为多个活动各换一次票，每次都现签会
+# 在一分钟内打出多次 autoLogin，触发 233031 限流乃至风控。有效期取 10 分钟。
+_MINTED: dict[str, tuple[float, str]] = {}
+_MINT_TTL = 600
+
 
 class LegacyAdapter(HTTPAdapter):
     """client.app.coc.10086.cn 要求 legacy renegotiation + 低安全等级套件。
@@ -251,12 +256,17 @@ def update_config_token(config_path: str, phone: str, cookie: str) -> bool:
 # ---------------------------------------------------------------- 续期
 
 def mint_cookie(profile: dict, timeout: int = 25) -> str | None:
-    """现签一张新会话 cookie。
+    """现签一张新会话 cookie（同进程内 10 分钟内复用，避免触发限流）。
 
     autoLogin 不校验来者的 JSESSIONID，故这里用随机 UUID 占位即可（只需 Cookie
     头存在，供 x-sign 拼串）。签名/加密其余部分必须用抓包还原的模板。
     成功返回 cookie 字符串；失败返回 None（调用方决定是否回退）。
     """
+    key = str(profile.get("phone") or "")
+    hit = _MINTED.get(key)
+    if hit and time.time() - hit[0] < _MINT_TTL:
+        return hit[1]
+
     url = profile["url"]
     plain = json.dumps(profile["template"], separators=(",", ":"), ensure_ascii=False)
     placeholder = f"JSESSIONID={uuid.uuid4()}; UID=placeholder"
@@ -276,7 +286,10 @@ def mint_cookie(profile: dict, timeout: int = 25) -> str | None:
         log.warning("现签会话失败: %s %s", (resp or {}).get("retCode"),
                     (resp or {}).get("retDesc") or r.content[:60])
         return None
-    return r.headers.get("Set-Cookie")
+    cookie = r.headers.get("Set-Cookie")
+    if cookie:
+        _MINTED[key] = (time.time(), cookie)
+    return cookie
 
 
 def refresh(profile: dict, timeout: int = 25, config_path: str = "") -> dict:
