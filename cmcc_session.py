@@ -366,7 +366,8 @@ def describe(profile: dict) -> str:
 def self_test() -> int:
     """离线校验加密链路（不联网）。
 
-    用真实抓包的 xs 向量断言，确保 SALT、URL 拼法、字段布局都没写错。
+    用 xs 向量断言，确保 SALT、URL 拼法、字段布局都没写错。
+    向量取自真实抓包，但手机号/设备指纹已替换为等长假值（算法与字段布局不变）。
     """
     url = "https://client.app.coc.10086.cn" + REFRESH_PATH
     real = ('{"tel":"15100000000","sv":"26.7.1","nt":"3","packageName":"cn.10086.app",'
@@ -395,7 +396,7 @@ def self_test() -> int:
         f"{h['x-token']}_{h['x-time']}_{h['x-nonce']}_afd2ca32-2e31-4ac6-a9e6-871519a56ec6".encode()
     ).hexdigest()
 
-    # 4) 已知抓包向量：xs 与 refreshSession 那条真实请求逐字节一致
+    # 4) xs 向量：与 refreshSession 请求的字段布局一致（已脱敏）
     rs_url = "https://client.app.coc.10086.cn/biz-orange/DN/refreshSession"
     rs_plain = ('{"tel":"15100000000","sv":"26.7.1","nt":"3","sn":"iPhone15,2","prov":"270",'
                 '"t":"0123456789abcdef0123456789abcdef","imei":"0123456789ABCDEF0123456789ABCDEF",'
@@ -405,9 +406,9 @@ def self_test() -> int:
                 '"xc":"B2000","ak":"0123456789ABCDEF0123456789ABCDEF01234567","cv":"12.5.5",'
                 '"sb":"apple","st":2}')
     got = hashlib.md5(f"{rs_url}_{rs_plain}_{SALT}".encode()).hexdigest()
-    assert got == "dff23a45ab1ad0ae17c6ae4098b41a37", got
+    assert got == "b52a75aa79e6e506222c6199cc8be97c", got
 
-    print("self-test OK：AES 往返、x-token 布局、x-sign 公式、真实抓包 xs 向量全部通过")
+    print("self-test OK：AES 往返、x-token 布局、x-sign 公式、xs 向量全部通过")
     return 0
 
 
