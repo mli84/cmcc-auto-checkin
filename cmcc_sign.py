@@ -455,6 +455,19 @@ def notify(cfg: Config, title: str, detail: str):
         log.warning("通知发送失败: %s", e)
 
 
+def summarize(lines: list[str]) -> str:
+    """推送只发摘要：签到结果 + 到账奖品 + 异常，完整清单留在日志里。
+
+    全量 lines 动辄上万字符，Bark 即便截断到 3800 仍会 413，手机上也没人看。
+    """
+    if not lines:
+        return "（无输出）"
+    keep = [lines[0]]
+    keep += [l for l in lines[1:] if "领到" in l or "领取成功" in l or "兑换成功" in l]
+    keep += [l for l in lines[1:] if "失败" in l or "执行异常" in l]
+    return "\n".join(keep) + "\n（完整清单见日志）"
+
+
 # ---------------------------------------------------------------- 主流程
 
 def run(cfg: Config, dry_run: bool, claim: bool = True, tasks: bool = False,
@@ -609,7 +622,7 @@ def run(cfg: Config, dry_run: bool, claim: bool = True, tasks: bool = False,
 
     summary = "\n".join(lines)
     log.info("\n%s", summary)
-    notify(cfg, "移动签到通知", f"{summary}\n手机尾号 {cfg.phone[-4:]}")
+    notify(cfg, "移动签到通知", f"{summarize(lines)}\n手机尾号 {cfg.phone[-4:]}")
     return 1 if seed_failed else 0
 
 
