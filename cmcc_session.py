@@ -72,11 +72,15 @@ TOK_KEY, TOK_IV = b"bAIgvwAuA4tbDr9d", b"9791027341711819"
 UA = "ChinaMobile/12.5.5 (iPhone; iOS 26.7.1; Scale/3.00)"
 REFRESH_PATH = "/biz-orange/LN/uamonekeylogin/autoLogin"
 
-# 服务端明确表示「本次登录不可继续」的返回码
+# 服务端明确表示「本次登录不可继续」的返回码 → (原因, 处置建议)
 DEAD_CODES = {
-    "410000": "会话空闲超时",
-    "233031": "登录请求过于频繁（同号短时间多次续期，稍后重试）",
-    "210000": "会话已失效",
+    "410000": ("会话空闲超时", "请重新冷启动抓包后用 --har 导入"),
+    "233031": ("登录请求过于频繁（同号短时间多次续期，稍后重试）", "稍后重试即可"),
+    "210000": ("会话已失效", "请重新冷启动抓包后用 --har 导入"),
+    # 该号码在别的设备（通常是真机 App）登录过，jwt/app_token 被顶掉，
+    # 且另一设备会话存活期间服务端拒绝再签发——抓包也救不回来。
+    "420000": ("该号码已在其他设备登录，服务端拒绝再签发会话",
+               "请在该号码手机上打开中国移动 App 退出登录（或重新登录）顶掉其他设备会话，稍后重试"),
 }
 
 log = logging.getLogger("cmcc_session")
@@ -452,9 +456,9 @@ def main() -> int:
                  res.get("city") or "", describe(profile))
         return 0
     if res.get("dead"):
-        log.error("会话不可用（%s %s）：%s，请重新冷启动抓包后用 --har 导入",
-                  res["retCode"], res.get("retDesc", ""),
-                  DEAD_CODES.get(res["retCode"], "未知原因"))
+        reason, hint = DEAD_CODES.get(res["retCode"], ("未知原因", "请重新冷启动抓包后用 --har 导入"))
+        log.error("会话不可用（%s %s）：%s，%s",
+                  res["retCode"], res.get("retDesc", ""), reason, hint)
         return 1
     log.error("现签失败：%s %s", res.get("retCode") or "-",
               res.get("retDesc") or res.get("reason"))
