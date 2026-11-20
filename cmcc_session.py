@@ -78,9 +78,11 @@ DEAD_CODES = {
     "233031": ("登录请求过于频繁（同号短时间多次续期，稍后重试）", "稍后重试即可"),
     "210000": ("会话已失效", "请重新冷启动抓包后用 --har 导入"),
     # 该号码在别的设备（通常是真机 App）登录过，jwt/app_token 被顶掉，
-    # 且另一设备会话存活期间服务端拒绝再签发——抓包也救不回来。
+    # 且另一设备会话存活期间服务端拒绝再签发。实测与端点/模板字段无关，
+    # 只与「模板里的设备指纹是否等于当前在用手机」有关：换机后必须重抓模板。
     "420000": ("该号码已在其他设备登录，服务端拒绝再签发会话",
-               "请在该号码手机上打开中国移动 App 退出登录（或重新登录）顶掉其他设备会话，稍后重试"),
+               "在该号码当前手机上打开中国移动 App 退出登录后重试；若换过手机，"
+               "用当前手机的抓包重新 --har 导入 profile（模板里的设备指纹须与在用手机一致）"),
 }
 
 log = logging.getLogger("cmcc_session")
@@ -212,6 +214,12 @@ def load_profile_from_har(path: str) -> dict:
             "captured_at": entry.get("startedDateTime"),
         }))
     if not candidates:
+        if not any((e["request"].get("postData") or {}).get("text")
+                   for e in har["log"]["entries"]):
+            raise SystemExit(
+                "该 HAR 只有 CONNECT 隧道（HTTPS 未解密），取不到请求体："
+                "抓包工具需对该域名开启 SSL Proxying，并在手机上安装/信任其根证书后重抓"
+            )
         raise SystemExit("HAR 里没找到可解的 biz-orange 加密请求（需带 x-token 与 cookie）")
     return min(candidates, key=lambda c: c[0])[1]
 
