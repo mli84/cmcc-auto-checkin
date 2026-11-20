@@ -1,0 +1,1211 @@
+{
+ "retCode": "000000",
+ "retDesc": "Success",
+ "rspBody": {
+  "newPlanRemainQryRes": {
+   "planRemianVoiceListRes": {
+    "planRemianVoiceInfoRes": [
+     {
+      "voicetype": "0",
+      "voiceSumNum": "300",
+      "voiceUsdNum": "98",
+      "voiceRemainNum": "202",
+      "unit": "01",
+      "planRemianVoiceRes": [
+       {
+        "planID": "G245489D",
+        "planName": "全家享99元套餐(2023版)300分钟国内(可共享)",
+        "validDate": "2026-09-01 00:00:00",
+        "expireDate": "2029-09-01 00:00:00",
+        "expireFlag": "0",
+        "unLimitType": "01",
+        "isMultiTerm": "0",
+        "voiceInfoRes": [
+         {
+          "voiceName": "国内主叫",
+          "totalRes": "300",
+          "usedRes": "98",
+          "remainRes": "202",
+          "unit": "01",
+          "voiceID": "5104",
+          "voiceInstanceId": "99999892829876",
+          "voiceValidDate": "2026-09-01 00:00:00",
+          "voiceExpireDate": "2029-09-01 00:00:00"
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   "planRemianMSGInfoListRes": {
+    "planRemianMSGInfoRes": [
+     {
+      "planName": "全球通白金卡短信权益包",
+      "planID": "G246596",
+      "validDate": "2025-04-11 21:08:15",
+      "expireDate": "2028-04-11 21:08:15",
+      "expireFlag": "0",
+      "unLimitType": "01",
+      "remark": "0",
+      "msgInfoRes": [
+       {
+        "planRemianMSGName": "短信",
+        "totalRes": "150",
+        "usedRes": "4",
+        "remainRes": "146",
+        "unit": "02",
+        "msgID": "5236",
+        "msgInstanceId": "100001553280409",
+        "msgValidDate": "2025-04-11 21:08:15",
+        "msgExpireDate": "2028-04-11 21:08:15"
+       }
+      ]
+     }
+    ],
+    "planRemianMSGRes": [
+     {
+      "mSGType": "0",
+      "mSGSum": "150",
+      "mSGuserd": "4",
+      "mSGresSum": "146"
+     }
+    ]
+   },
+   "planRemianFlowListRes": {
+    "usedtotal": "45.51",
+    "unit": "04",
+    "limitType": "01",
+    "state": "00",
+    "limiteRemainNum": "3.89",
+    "planRemianFlowRes": [
+     {
+      "flowtype": "0",
+      "flowSumNum": "50577.41",
+      "flowUsdNum": "46598.76",
+      "flowRemainNum": "3978.65",
+      "unit": "03",
+      "planRemianFlowInfoRes": [
+       {
+        "planID": "2020999900103763",
+        "planName": "统一营销流量日包-1GB(2026/11/20 08:06:42-2026/11/21 08:06:42)",
+        "plantype": "01",
+        "isMultiTerm": "1",
+        "validDate": "2026-11-20 08:06:42",
+        "expireDate": "2026-11-21 08:06:42",
+        "expireFlag": "0",
+        "flowInfoRes": [
+         {
+          "flowName": "国内流量(套内)",
+          "totalRes": "1024",
+          "usedRes": "1024",
+          "remainRes": "0",
+          "unit": "03",
+          "gATFlag": "1",
+          "flowID": "2206",
+          "flowInstanceId": "100001916141094",
+          "flowValidDate": "2026-11-20 08:06:42",
+          "flowExpireDate": "2026-11-21 08:06:42"
+         }
+        ]
+       },
+       {
+        "planID": "2020999900103762",
+        "planName": "统一营销流量日包-500MB(2026/11/20 19:15:27-2026/11/21 19:15:27)",
+        "plantype": "01",
+        "isMultiTerm": "1",
+        "validDate": "2026-11-20 19:15:27",
+        "expireDate": "2026-11-21 19:15:27",
+        "expireFlag": "0",
+        "flowInfoRes": [
+         {
+          "flowName": "国内流量(套内)",
+          "totalRes": "500",
+          "usedRes": "108",
+          "remainRes": "391",
+          "unit": "03",
+          "gATFlag": "1",
+          "flowID": "2202",
+          "flowInstanceId": "100001916352009",
+          "flowValidDate": "2026-11-20 19:15:27",
+          "flowExpireDate": "2026-11-21 19:15:27"
+         }
+        ]
+       },
+       {
+        "planID": "G234657P",
+        "planName": "10086流量关怀享3GB1个月(线上)",
+        "plantype": "01",
+        "isMultiTerm": "1",
+        "validDate": "2026-11-07 19:31:28",
+        "expireDate": "2026-12-01 00:00:00",
+        "expireFlag": "0",
+        "flowInfoRes": [
+         {
+          "flowName": "国内流量(套内)",
+          "totalRes": "3072",
+          "usedRes": "3072",
+          "remainRes": "0",
+          "unit": "03",
+          "gATFlag": "1",
+          "flowID": "2041",
+          "flowInstanceId": "100001912839866",
+          "flowValidDate": "2026-11-07 19:31:28",
+          "flowExpireDate": "2026-12-01 00:00:00"
+         }
+        ]
+       },
+       {
+        "planID": "G246229",
+        "planName": "统一营销流量月包-1GB",
+        "plantype": "01",
+        "isMultiTerm": "1",
+        "validDate": "2026-11-12 08:51:46",
+        "expireDate": "2026-12-01 00:00:00",
+        "expireFlag": "0",
+        "flowInfoRes": [
+         {
+          "flowName": "国内流量",
+          "totalRes": "1024",
+          "usedRes": "1024",
+          "remainRes": "0",
+          "unit": "03",
+          "gATFlag": "1",
+          "flowID": "8259",
+          "flowInstanceId": "100001914069889",
+          "flowValidDate": "2026-11-12 08:51:46",
+          "flowExpireDate": "2026-12-01 00:00:00"
+         }
+        ]
+       },
+       {
+        "planID": "G239310A",
+        "planName": "5元5G7天包(20261118-20261125)",
+        "plantype": "01",
+        "isMultiTerm": "1",
+        "validDate": "2026-11-18 14:53:11",
+        "expireDate": "2026-11-25 00:00:00",
+        "expireFlag": "0",
+        "flowInfoRes": [
+         {
+          "flowName": "国内流量",
+          "totalRes": "5120",
+          "usedRes": "3351",
+          "remainRes": "1768",
+          "unit": "03",
+          "gATFlag": "1",
+          "flowID": "5117",
+          "flowInstanceId": "100001915746641",
+          "flowValidDate": "2026-11-18 14:53:11",
+          "flowExpireDate": "2026-11-25 00:00:00"
+         }
+        ]
+       },
+       {
+        "planID": "G246385",
+        "planName": "统一营销流量月包-3GB",
+        "plantype": "01",
+        "isMultiTerm": "1",
+        "validDate": "2026-11-16 21:20:43",
+        "expireDate": "2026-12-01 00:00:00",
+        "expireFlag": "0",
+        "flowInfoRes": [
+         {
+          "flowName": "国内流量",
+          "totalRes": "3072",
+          "usedRes": "1678",
+          "remainRes": "1393",
+          "unit": "03",
+          "gATFlag": "1",
+          "flowID": "5132",
+          "flowInstanceId": "100001915294450",
+          "flowValidDate": "2026-11-16 21:20:43",
+          "flowExpireDate": "2026-12-01 00:00:00"
+         }
+        ]
+       },
+       {
+        "planID": "G245489C",
+        "planName": "全家享99元套餐(2023版)20GB流量(可共享)（上月结转）",
+        "plantype": "01",
+        "isMultiTerm": "0",
+        "validDate": "2026-11-01 00:00:00",
+        "expireDate": "2026-11-30 23:59:59",
+        "expireFlag": "0",
+        "flowInfoRes": [
+         {
+          "flowName": "国内流量",
+          "flowContinueFlag": "0",
+          "totalRes": "1667",
+          "usedRes": "1667",
+          "remainRes": "0",
+          "unit": "03",
+          "gATFlag": "1",
+          "flowID": "20155",
+          "flowInstanceId": "99999892829877",
+          "flowValidDate": "2026-11-01 00:00:00",
+          "flowExpireDate": "2026-11-30 23:59:59"
+         }
+        ]
+       },
+       {
+        "planID": "G245489C",
+        "planName": "全家享99元套餐(2023版)20GB流量(可共享)",
+        "plantype": "01",
+        "isMultiTerm": "0",
+        "validDate": "2026-09-01 00:00:00",
+        "expireDate": "2029-09-01 00:00:00",
+        "expireFlag": "0",
+        "flowInfoRes": [
+         {
+          "flowName": "国内流量",
+          "totalRes": "20480",
+          "usedRes": "20054",
+          "remainRes": "425",
+          "unit": "03",
+          "gATFlag": "1",
+          "flowID": "20155",
+          "flowInstanceId": "99999892829877",
+          "flowValidDate": "2026-09-01 00:00:00",
+          "flowExpireDate": "2029-09-01 00:00:00"
+         }
+        ]
+       },
+       {
+        "planID": "G305641",
+        "planName": "统一营销流量日包-100MB（已失效）(2026/11/03 08:33:13-2026/11/04 08:33:13)",
+        "plantype": "01",
+        "isMultiTerm": "1",
+        "validDate": "2026-11-03 08:33:13",
+        "expireDate": "2026-11-04 08:33:13",
+        "expireFlag": "1",
+        "flowInfoRes": [
+         {
+          "flowName": "国内流量",
+          "totalRes": "100",
+          "usedRes": "100",
+          "remainRes": "0",
+          "unit": "03",
+          "gATFlag": "1",
+          "flowID": "75022",
+          "flowInstanceId": "100001911384061",
+          "flowValidDate": "2026-11-03 08:33:13",
+          "flowExpireDate": "2026-11-04 08:33:13"
+         }
+        ]
+       },
+       {
+        "planID": "2020999900103762",
+        "planName": "统一营销流量日包-500MB（已失效）(2026/11/03 08:33:28-2026/11/04 08:33:28)",
+        "plantype": "01",
+        "isMultiTerm": "1",
+        "validDate": "2026-11-03 08:33:28",
+        "expireDate": "2026-11-04 08:33:28",
+        "expireFlag": "1",
+        "flowInfoRes": [
+         {
+          "flowName": "国内流量(套内)",
+          "totalRes": "500",
+          "usedRes": "500",
+          "remainRes": "0",
+          "unit": "03",
+          "gATFlag": "1",
+          "flowID": "2202",
+          "flowInstanceId": "100001911384064",
+          "flowValidDate": "2026-11-03 08:33:28",
+          "flowExpireDate": "2026-11-04 08:33:28"
+         }
+        ]
+       },
+       {
+        "planID": "G305641",
+        "planName": "统一营销流量日包-100MB（已失效）(2026/11/03 08:33:47-2026/11/04 08:33:47)",
+        "plantype": "01",
+        "isMultiTerm": "1",
+        "validDate": "2026-11-03 08:33:47",
+        "expireDate": "2026-11-04 08:33:47",
+        "expireFlag": "1",
+        "flowInfoRes": [
+         {
+          "flowName": "国内流量",
+          "totalRes": "100",
+          "usedRes": "87",
+          "remainRes": "12",
+          "unit": "03",
+          "gATFlag": "1",
+          "flowID": "75022",
+          "flowInstanceId": "100001911384065",
+          "flowValidDate": "2026-11-03 08:33:47",
+          "flowExpireDate": "2026-11-04 08:33:47"
+         }
+        ]
+       },
+       {
+        "planID": "G305641",
+        "planName": "统一营销流量日包-100MB（已失效）(2026/11/03 08:34:57-2026/11/04 08:34:57)",
+        "plantype": "01",
+        "isMultiTerm": "1",
+        "validDate": "2026-11-03 08:34:57",
+        "expireDate": "2026-11-04 08:34:57",
+        "expireFlag": "1",
+        "flowInfoRes": [
+         {
+          "flowName": "国内流量",
+          "totalRes": "100",
+          "usedRes": "0",
+          "remainRes": "100",
+          "unit": "03",
+          "gATFlag": "1",
+          "flowID": "75022",
+          "flowInstanceId": "100001911384774",
+          "flowValidDate": "2026-11-03 08:34:57",
+          "flowExpireDate": "2026-11-04 08:34:57"
+         }
+        ]
+       },
+       {
+        "planID": "G236292",
+        "planName": "统一营销流量日包-2GB（已失效）(2026/11/03 08:37:56-2026/11/04 08:37:56)",
+        "plantype": "01",
+        "isMultiTerm": "1",
+        "validDate": "2026-11-03 08:37:56",
+        "expireDate": "2026-11-04 08:37:56",
+        "expireFlag": "1",
+        "flowInfoRes": [
+         {
+          "flowName": "国内流量(赠送)",
+          "totalRes": "2048",
+          "usedRes": "0",
+          "remainRes": "2047",
+          "unit": "03",
+          "gATFlag": "1",
+          "flowID": "8430",
+          "flowInstanceId": "100001911385972",
+          "flowValidDate": "2026-11-03 08:37:56",
+          "flowExpireDate": "2026-11-04 08:37:56"
+         }
+        ]
+       },
+       {
+        "planID": "G305641",
+        "planName": "统一营销流量日包-100MB（已失效）(2026/11/03 08:38:10-2026/11/04 08:38:10)",
+        "plantype": "01",
+        "isMultiTerm": "1",
+        "validDate": "2026-11-03 08:38:10",
+        "expireDate": "2026-11-04 08:38:10",
+        "expireFlag": "1",
+        "flowInfoRes": [
+         {
+          "flowName": "国内流量",
+          "totalRes": "100",
+          "usedRes": "0",
+          "remainRes": "100",
+          "unit": "03",
+          "gATFlag": "1",
+          "flowID": "75022",
+          "flowInstanceId": "100001911386665",
+          "flowValidDate": "2026-11-03 08:38:10",
+          "flowExpireDate": "2026-11-04 08:38:10"
+         }
+        ]
+       },
+       {
+        "planID": "2020999900103763",
+        "planName": "统一营销流量日包-1GB（已失效）(2026/11/03 08:38:24-2026/11/04 08:38:24)",
+        "plantype": "01",
+        "isMultiTerm": "1",
+        "validDate": "2026-11-03 08:38:24",
+        "expireDate": "2026-11-04 08:38:24",
+        "expireFlag": "1",
+        "flowInfoRes": [
+         {
+          "flowName": "国内流量(套内)",
+          "totalRes": "1024",
+          "usedRes": "0",
+          "remainRes": "1024",
+          "unit": "03",
+          "gATFlag": "1",
+          "flowID": "2206",
+          "flowInstanceId": "100001911386666",
+          "flowValidDate": "2026-11-03 08:38:24",
+          "flowExpireDate": "2026-11-04 08:38:24"
+         }
+        ]
+       },
+       {
+        "planID": "G305641",
+        "planName": "统一营销流量日包-100MB（已失效）(2026/11/03 08:38:41-2026/11/04 08:38:41)",
+        "plantype": "01",
+        "isMultiTerm": "1",
+        "validDate": "2026-11-03 08:38:41",
+        "expireDate": "2026-11-04 08:38:41",
+        "expireFlag": "1",
+        "flowInfoRes": [
+         {
+          "flowName": "国内流量",
+          "totalRes": "100",
+          "usedRes": "0",
+          "remainRes": "99",
+          "unit": "03",
+          "gATFlag": "1",
+          "flowID": "75022",
+          "flowInstanceId": "100001911386668",
+          "flowValidDate": "2026-11-03 08:38:41",
+          "flowExpireDate": "2026-11-04 08:38:41"
+         }
+        ]
+       },
+       {
+        "planID": "G305641",
+        "planName": "统一营销流量日包-100MB（已失效）(2026/11/10 08:45:19-2026/11/11 08:45:19)",
+        "plantype": "01",
+        "isMultiTerm": "1",
+        "validDate": "2026-11-10 08:45:19",
+        "expireDate": "2026-11-11 08:45:19",
+        "expireFlag": "1",
+        "flowInfoRes": [
+         {
+          "flowName": "国内流量",
+          "totalRes": "100",
+          "usedRes": "100",
+          "remainRes": "0",
+          "unit": "03",
+          "gATFlag": "1",
+          "flowID": "75022",
+          "flowInstanceId": "100001913501893",
+          "flowValidDate": "2026-11-10 08:45:19",
+          "flowExpireDate": "2026-11-11 08:45:19"
+         }
+        ]
+       },
+       {
+        "planID": "G305641",
+        "planName": "统一营销流量日包-100MB（已失效）(2026/11/10 08:45:31-2026/11/11 08:45:31)",
+        "plantype": "01",
+        "isMultiTerm": "1",
+        "validDate": "2026-11-10 08:45:31",
+        "expireDate": "2026-11-11 08:45:31",
+        "expireFlag": "1",
+        "flowInfoRes": [
+         {
+          "flowName": "国内流量",
+          "totalRes": "100",
+          "usedRes": "100",
+          "remainRes": "0",
+          "unit": "03",
+          "gATFlag": "1",
+          "flowID": "75022",
+          "flowInstanceId": "100001913501900",
+          "flowValidDate": "2026-11-10 08:45:31",
+          "flowExpireDate": "2026-11-11 08:45:31"
+         }
+        ]
+       },
+       {
+        "planID": "G305641",
+        "planName": "统一营销流量日包-100MB（已失效）(2026/11/10 08:45:41-2026/11/11 08:45:41)",
+        "plantype": "01",
+        "isMultiTerm": "1",
+        "validDate": "2026-11-10 08:45:41",
+        "expireDate": "2026-11-11 08:45:41",
+        "expireFlag": "1",
+        "flowInfoRes": [
+         {
+          "flowName": "国内流量",
+          "totalRes": "100",
+          "usedRes": "100",
+          "remainRes": "0",
+          "unit": "03",
+          "gATFlag": "1",
+          "flowID": "75022",
+          "flowInstanceId": "100001913502318",
+          "flowValidDate": "2026-11-10 08:45:41",
+          "flowExpireDate": "2026-11-11 08:45:41"
+         }
+        ]
+       },
+       {
+        "planID": "G305641",
+        "planName": "统一营销流量日包-100MB（已失效）(2026/11/10 08:45:56-2026/11/11 08:45:56)",
+        "plantype": "01",
+        "isMultiTerm": "1",
+        "validDate": "2026-11-10 08:45:56",
+        "expireDate": "2026-11-11 08:45:56",
+        "expireFlag": "1",
+        "flowInfoRes": [
+         {
+          "flowName": "国内流量",
+          "totalRes": "100",
+          "usedRes": "100",
+          "remainRes": "0",
+          "unit": "03",
+          "gATFlag": "1",
+          "flowID": "75022",
+          "flowInstanceId": "100001913502330",
+          "flowValidDate": "2026-11-10 08:45:56",
+          "flowExpireDate": "2026-11-11 08:45:56"
+         }
+        ]
+       },
+       {
+        "planID": "G305641",
+        "planName": "统一营销流量日包-100MB（已失效）(2026/11/10 08:46:13-2026/11/11 08:46:13)",
+        "plantype": "01",
+        "isMultiTerm": "1",
+        "validDate": "2026-11-10 08:46:13",
+        "expireDate": "2026-11-11 08:46:13",
+        "expireFlag": "1",
+        "flowInfoRes": [
+         {
+          "flowName": "国内流量",
+          "totalRes": "100",
+          "usedRes": "100",
+          "remainRes": "0",
+          "unit": "03",
+          "gATFlag": "1",
+          "flowID": "75022",
+          "flowInstanceId": "100001913502343",
+          "flowValidDate": "2026-11-10 08:46:13",
+          "flowExpireDate": "2026-11-11 08:46:13"
+         }
+        ]
+       },
+       {
+        "planID": "G305641",
+        "planName": "统一营销流量日包-100MB（已失效）(2026/11/10 08:49:06-2026/11/11 08:49:06)",
+        "plantype": "01",
+        "isMultiTerm": "1",
+        "validDate": "2026-11-10 08:49:06",
+        "expireDate": "2026-11-11 08:49:06",
+        "expireFlag": "1",
+        "flowInfoRes": [
+         {
+          "flowName": "国内流量",
+          "totalRes": "100",
+          "usedRes": "100",
+          "remainRes": "0",
+          "unit": "03",
+          "gATFlag": "1",
+          "flowID": "75022",
+          "flowInstanceId": "100001913503360",
+          "flowValidDate": "2026-11-10 08:49:06",
+          "flowExpireDate": "2026-11-11 08:49:06"
+         }
+        ]
+       },
+       {
+        "planID": "G305641",
+        "planName": "统一营销流量日包-100MB（已失效）(2026/11/10 08:49:20-2026/11/11 08:49:20)",
+        "plantype": "01",
+        "isMultiTerm": "1",
+        "validDate": "2026-11-10 08:49:20",
+        "expireDate": "2026-11-11 08:49:20",
+        "expireFlag": "1",
+        "flowInfoRes": [
+         {
+          "flowName": "国内流量",
+          "totalRes": "100",
+          "usedRes": "100",
+          "remainRes": "0",
+          "unit": "03",
+          "gATFlag": "1",
+          "flowID": "75022",
+          "flowInstanceId": "100001913503671",
+          "flowValidDate": "2026-11-10 08:49:20",
+          "flowExpireDate": "2026-11-11 08:49:20"
+         }
+        ]
+       },
+       {
+        "planID": "G305641",
+        "planName": "统一营销流量日包-100MB（已失效）(2026/11/10 08:49:32-2026/11/11 08:49:32)",
+        "plantype": "01",
+        "isMultiTerm": "1",
+        "validDate": "2026-11-10 08:49:32",
+        "expireDate": "2026-11-11 08:49:32",
+        "expireFlag": "1",
+        "flowInfoRes": [
+         {
+          "flowName": "国内流量",
+          "totalRes": "100",
+          "usedRes": "100",
+          "remainRes": "0",
+          "unit": "03",
+          "gATFlag": "1",
+          "flowID": "75022",
+          "flowInstanceId": "100001913503676",
+          "flowValidDate": "2026-11-10 08:49:32",
+          "flowExpireDate": "2026-11-11 08:49:32"
+         }
+        ]
+       },
+       {
+        "planID": "G305641",
+        "planName": "统一营销流量日包-100MB（已失效）(2026/11/12 08:53:39-2026/11/13 08:53:39)",
+        "plantype": "01",
+        "isMultiTerm": "1",
+        "validDate": "2026-11-12 08:53:39",
+        "expireDate": "2026-11-13 08:53:39",
+        "expireFlag": "1",
+        "flowInfoRes": [
+         {
+          "flowName": "国内流量",
+          "totalRes": "100",
+          "usedRes": "100",
+          "remainRes": "0",
+          "unit": "03",
+          "gATFlag": "1",
+          "flowID": "75022",
+          "flowInstanceId": "100001914070674",
+          "flowValidDate": "2026-11-12 08:53:39",
+          "flowExpireDate": "2026-11-13 08:53:39"
+         }
+        ]
+       },
+       {
+        "planID": "G305641",
+        "planName": "统一营销流量日包-100MB（已失效）(2026/11/12 08:54:06-2026/11/13 08:54:06)",
+        "plantype": "01",
+        "isMultiTerm": "1",
+        "validDate": "2026-11-12 08:54:06",
+        "expireDate": "2026-11-13 08:54:06",
+        "expireFlag": "1",
+        "flowInfoRes": [
+         {
+          "flowName": "国内流量",
+          "totalRes": "100",
+          "usedRes": "100",
+          "remainRes": "0",
+          "unit": "03",
+          "gATFlag": "1",
+          "flowID": "75022",
+          "flowInstanceId": "100001914071087",
+          "flowValidDate": "2026-11-12 08:54:06",
+          "flowExpireDate": "2026-11-13 08:54:06"
+         }
+        ]
+       },
+       {
+        "planID": "G305641",
+        "planName": "统一营销流量日包-100MB（已失效）(2026/11/12 08:54:27-2026/11/13 08:54:27)",
+        "plantype": "01",
+        "isMultiTerm": "1",
+        "validDate": "2026-11-12 08:54:27",
+        "expireDate": "2026-11-13 08:54:27",
+        "expireFlag": "1",
+        "flowInfoRes": [
+         {
+          "flowName": "国内流量",
+          "totalRes": "100",
+          "usedRes": "100",
+          "remainRes": "0",
+          "unit": "03",
+          "gATFlag": "1",
+          "flowID": "75022",
+          "flowInstanceId": "100001914071088",
+          "flowValidDate": "2026-11-12 08:54:27",
+          "flowExpireDate": "2026-11-13 08:54:27"
+         }
+        ]
+       },
+       {
+        "planID": "2020999900103763",
+        "planName": "统一营销流量日包-1GB（已失效）(2026/11/12 08:55:24-2026/11/13 08:55:24)",
+        "plantype": "01",
+        "isMultiTerm": "1",
+        "validDate": "2026-11-12 08:55:24",
+        "expireDate": "2026-11-13 08:55:24",
+        "expireFlag": "1",
+        "flowInfoRes": [
+         {
+          "flowName": "国内流量(套内)",
+          "totalRes": "1024",
+          "usedRes": "589",
+          "remainRes": "434",
+          "unit": "03",
+          "gATFlag": "1",
+          "flowID": "2206",
+          "flowInstanceId": "100001914071335",
+          "flowValidDate": "2026-11-12 08:55:24",
+          "flowExpireDate": "2026-11-13 08:55:24"
+         }
+        ]
+       },
+       {
+        "planID": "G236292",
+        "planName": "统一营销流量日包-2GB（已失效）(2026/11/12 08:55:39-2026/11/13 08:55:39)",
+        "plantype": "01",
+        "isMultiTerm": "1",
+        "validDate": "2026-11-12 08:55:39",
+        "expireDate": "2026-11-13 08:55:39",
+        "expireFlag": "1",
+        "flowInfoRes": [
+         {
+          "flowName": "国内流量(赠送)",
+          "totalRes": "2048",
+          "usedRes": "0",
+          "remainRes": "2048",
+          "unit": "03",
+          "gATFlag": "1",
+          "flowID": "8430",
+          "flowInstanceId": "100001914071648",
+          "flowValidDate": "2026-11-12 08:55:39",
+          "flowExpireDate": "2026-11-13 08:55:39"
+         }
+        ]
+       },
+       {
+        "planID": "G305641",
+        "planName": "统一营销流量日包-100MB（已失效）(2026/11/17 08:28:33-2026/11/18 08:28:33)",
+        "plantype": "01",
+        "isMultiTerm": "1",
+        "validDate": "2026-11-17 08:28:33",
+        "expireDate": "2026-11-18 08:28:33",
+        "expireFlag": "1",
+        "flowInfoRes": [
+         {
+          "flowName": "国内流量",
+          "totalRes": "100",
+          "usedRes": "100",
+          "remainRes": "0",
+          "unit": "03",
+          "gATFlag": "1",
+          "flowID": "75022",
+          "flowInstanceId": "100001915365914",
+          "flowValidDate": "2026-11-17 08:28:33",
+          "flowExpireDate": "2026-11-18 08:28:33"
+         }
+        ]
+       },
+       {
+        "planID": "G305641",
+        "planName": "统一营销流量日包-100MB（已失效）(2026/11/17 08:28:59-2026/11/18 08:28:59)",
+        "plantype": "01",
+        "isMultiTerm": "1",
+        "validDate": "2026-11-17 08:28:59",
+        "expireDate": "2026-11-18 08:28:59",
+        "expireFlag": "1",
+        "flowInfoRes": [
+         {
+          "flowName": "国内流量",
+          "totalRes": "100",
+          "usedRes": "100",
+          "remainRes": "0",
+          "unit": "03",
+          "gATFlag": "1",
+          "flowID": "75022",
+          "flowInstanceId": "100001915365916",
+          "flowValidDate": "2026-11-17 08:28:59",
+          "flowExpireDate": "2026-11-18 08:28:59"
+         }
+        ]
+       },
+       {
+        "planID": "G305641",
+        "planName": "统一营销流量日包-100MB（已失效）(2026/11/17 08:29:12-2026/11/18 08:29:12)",
+        "plantype": "01",
+        "isMultiTerm": "1",
+        "validDate": "2026-11-17 08:29:12",
+        "expireDate": "2026-11-18 08:29:12",
+        "expireFlag": "1",
+        "flowInfoRes": [
+         {
+          "flowName": "国内流量",
+          "totalRes": "100",
+          "usedRes": "100",
+          "remainRes": "0",
+          "unit": "03",
+          "gATFlag": "1",
+          "flowID": "75022",
+          "flowInstanceId": "100001915365923",
+          "flowValidDate": "2026-11-17 08:29:12",
+          "flowExpireDate": "2026-11-18 08:29:12"
+         }
+        ]
+       },
+       {
+        "planID": "G305641",
+        "planName": "统一营销流量日包-100MB（已失效）(2026/11/17 08:29:28-2026/11/18 08:29:28)",
+        "plantype": "01",
+        "isMultiTerm": "1",
+        "validDate": "2026-11-17 08:29:28",
+        "expireDate": "2026-11-18 08:29:28",
+        "expireFlag": "1",
+        "flowInfoRes": [
+         {
+          "flowName": "国内流量",
+          "totalRes": "100",
+          "usedRes": "100",
+          "remainRes": "0",
+          "unit": "03",
+          "gATFlag": "1",
+          "flowID": "75022",
+          "flowInstanceId": "100001915366174",
+          "flowValidDate": "2026-11-17 08:29:28",
+          "flowExpireDate": "2026-11-18 08:29:28"
+         }
+        ]
+       },
+       {
+        "planID": "G305641",
+        "planName": "统一营销流量日包-100MB（已失效）(2026/11/17 08:29:44-2026/11/18 08:29:44)",
+        "plantype": "01",
+        "isMultiTerm": "1",
+        "validDate": "2026-11-17 08:29:44",
+        "expireDate": "2026-11-18 08:29:44",
+        "expireFlag": "1",
+        "flowInfoRes": [
+         {
+          "flowName": "国内流量",
+          "totalRes": "100",
+          "usedRes": "100",
+          "remainRes": "0",
+          "unit": "03",
+          "gATFlag": "1",
+          "flowID": "75022",
+          "flowInstanceId": "100001915366176",
+          "flowValidDate": "2026-11-17 08:29:44",
+          "flowExpireDate": "2026-11-18 08:29:44"
+         }
+        ]
+       },
+       {
+        "planID": "G305641",
+        "planName": "统一营销流量日包-100MB（已失效）(2026/11/17 08:31:23-2026/11/18 08:31:23)",
+        "plantype": "01",
+        "isMultiTerm": "1",
+        "validDate": "2026-11-17 08:31:23",
+        "expireDate": "2026-11-18 08:31:23",
+        "expireFlag": "1",
+        "flowInfoRes": [
+         {
+          "flowName": "国内流量",
+          "totalRes": "100",
+          "usedRes": "100",
+          "remainRes": "0",
+          "unit": "03",
+          "gATFlag": "1",
+          "flowID": "75022",
+          "flowInstanceId": "100001915366881",
+          "flowValidDate": "2026-11-17 08:31:23",
+          "flowExpireDate": "2026-11-18 08:31:23"
+         }
+        ]
+       },
+       {
+        "planID": "G305641",
+        "planName": "统一营销流量日包-100MB（已失效）(2026/11/17 08:31:37-2026/11/18 08:31:37)",
+        "plantype": "01",
+        "isMultiTerm": "1",
+        "validDate": "2026-11-17 08:31:37",
+        "expireDate": "2026-11-18 08:31:37",
+        "expireFlag": "1",
+        "flowInfoRes": [
+         {
+          "flowName": "国内流量",
+          "totalRes": "100",
+          "usedRes": "100",
+          "remainRes": "0",
+          "unit": "03",
+          "gATFlag": "1",
+          "flowID": "75022",
+          "flowInstanceId": "100001915366884",
+          "flowValidDate": "2026-11-17 08:31:37",
+          "flowExpireDate": "2026-11-18 08:31:37"
+         }
+        ]
+       },
+       {
+        "planID": "G305641",
+        "planName": "统一营销流量日包-100MB（已失效）(2026/11/17 08:31:54-2026/11/18 08:31:54)",
+        "plantype": "01",
+        "isMultiTerm": "1",
+        "validDate": "2026-11-17 08:31:54",
+        "expireDate": "2026-11-18 08:31:54",
+        "expireFlag": "1",
+        "flowInfoRes": [
+         {
+          "flowName": "国内流量",
+          "totalRes": "100",
+          "usedRes": "100",
+          "remainRes": "0",
+          "unit": "03",
+          "gATFlag": "1",
+          "flowID": "75022",
+          "flowInstanceId": "100001915366888",
+          "flowValidDate": "2026-11-17 08:31:54",
+          "flowExpireDate": "2026-11-18 08:31:54"
+         }
+        ]
+       },
+       {
+        "planID": "G305641",
+        "planName": "统一营销流量日包-100MB（已失效）(2026/11/18 08:51:31-2026/11/19 08:51:31)",
+        "plantype": "01",
+        "isMultiTerm": "1",
+        "validDate": "2026-11-18 08:51:31",
+        "expireDate": "2026-11-19 08:51:31",
+        "expireFlag": "1",
+        "flowInfoRes": [
+         {
+          "flowName": "国内流量",
+          "totalRes": "100",
+          "usedRes": "100",
+          "remainRes": "0",
+          "unit": "03",
+          "gATFlag": "1",
+          "flowID": "75022",
+          "flowInstanceId": "100001915641905",
+          "flowValidDate": "2026-11-18 08:51:31",
+          "flowExpireDate": "2026-11-19 08:51:31"
+         }
+        ]
+       },
+       {
+        "planID": "2020999900103762",
+        "planName": "统一营销流量日包-500MB（已失效）(2026/11/18 09:07:33-2026/11/19 09:07:33)",
+        "plantype": "01",
+        "isMultiTerm": "1",
+        "validDate": "2026-11-18 09:07:33",
+        "expireDate": "2026-11-19 09:07:33",
+        "expireFlag": "1",
+        "flowInfoRes": [
+         {
+          "flowName": "国内流量(套内)",
+          "totalRes": "500",
+          "usedRes": "500",
+          "remainRes": "0",
+          "unit": "03",
+          "gATFlag": "1",
+          "flowID": "2202",
+          "flowInstanceId": "100001915647273",
+          "flowValidDate": "2026-11-18 09:07:33",
+          "flowExpireDate": "2026-11-19 09:07:33"
+         }
+        ]
+       },
+       {
+        "planID": "G305641",
+        "planName": "统一营销流量日包-100MB（已失效）(2026/11/19 17:32:47-2026/11/20 17:32:47)",
+        "plantype": "01",
+        "isMultiTerm": "1",
+        "validDate": "2026-11-19 17:32:47",
+        "expireDate": "2026-11-20 17:32:47",
+        "expireFlag": "1",
+        "flowInfoRes": [
+         {
+          "flowName": "国内流量",
+          "totalRes": "100",
+          "usedRes": "100",
+          "remainRes": "0",
+          "unit": "03",
+          "gATFlag": "1",
+          "flowID": "75022",
+          "flowInstanceId": "100001916057966",
+          "flowValidDate": "2026-11-19 17:32:47",
+          "flowExpireDate": "2026-11-20 17:32:47"
+         }
+        ]
+       },
+       {
+        "planID": "2020999900103762",
+        "planName": "统一营销流量日包-500MB（已失效）(2026/11/19 20:16:23-2026/11/20 20:16:23)",
+        "plantype": "01",
+        "isMultiTerm": "1",
+        "validDate": "2026-11-19 20:16:23",
+        "expireDate": "2026-11-20 20:16:23",
+        "expireFlag": "1",
+        "flowInfoRes": [
+         {
+          "flowName": "国内流量(套内)",
+          "totalRes": "500",
+          "usedRes": "500",
+          "remainRes": "0",
+          "unit": "03",
+          "gATFlag": "1",
+          "flowID": "2202",
+          "flowInstanceId": "100001916086587",
+          "flowValidDate": "2026-11-19 20:16:23",
+          "flowExpireDate": "2026-11-20 20:16:23"
+         }
+        ]
+       },
+       {
+        "planID": "G239310A",
+        "planName": "5元5G7天包（已失效）(20261026-20261102)",
+        "plantype": "01",
+        "isMultiTerm": "1",
+        "validDate": "2026-10-26 17:10:35",
+        "expireDate": "2026-11-02 00:00:00",
+        "expireFlag": "1",
+        "flowInfoRes": [
+         {
+          "flowName": "国内流量",
+          "totalRes": "5120",
+          "usedRes": "5120",
+          "remainRes": "0",
+          "unit": "03",
+          "gATFlag": "1",
+          "flowID": "5117",
+          "flowInstanceId": "100001908311220",
+          "flowValidDate": "2026-10-26 17:10:35",
+          "flowExpireDate": "2026-11-02 00:00:00"
+         }
+        ]
+       },
+       {
+        "planID": "G302621",
+        "planName": "统一营销流量7天包-5GB（已失效）(2026/10/28 00:05:44-2026/11/04 00:05:44)",
+        "plantype": "01",
+        "isMultiTerm": "1",
+        "validDate": "2026-10-28 00:05:44",
+        "expireDate": "2026-11-04 00:05:44",
+        "expireFlag": "1",
+        "flowInfoRes": [
+         {
+          "flowName": "国内流量",
+          "totalRes": "5120",
+          "usedRes": "5120",
+          "remainRes": "0",
+          "unit": "03",
+          "gATFlag": "1",
+          "flowID": "8418",
+          "flowInstanceId": "100001908707956",
+          "flowValidDate": "2026-10-28 00:05:44",
+          "flowExpireDate": "2026-11-04 00:05:44"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "flowtype": "1",
+      "flowSumNum": "N",
+      "flowUsdNum": "6.54",
+      "flowRemainNum": "N",
+      "unit": "03",
+      "planRemianFlowInfoRes": [
+       {
+        "planID": "G238675B",
+        "planName": "0元移动云盘定向流量（会员权益）",
+        "plantype": "03",
+        "isMultiTerm": "1",
+        "validDate": "2026-01-01 17:06:01",
+        "expireDate": "2029-01-01 17:06:01",
+        "expireFlag": "0",
+        "flowInfoRes": [
+         {
+          "flowName": "定向流量",
+          "totalRes": "N",
+          "usedRes": "6",
+          "remainRes": "N",
+          "unit": "03",
+          "gATFlag": "1",
+          "flowID": "7206",
+          "flowInstanceId": "100001786811605",
+          "flowValidDate": "2026-01-01 17:06:01",
+          "flowExpireDate": "2029-01-01 17:06:01"
+         }
+        ],
+        "appInfoRes": [
+         {
+          "appID": "1750000068",
+          "appTag": "移动云盘前向"
+         }
+        ]
+       },
+       {
+        "planID": "G302853",
+        "planName": "30GB移动云盘定向流量免费服务",
+        "plantype": "01",
+        "isMultiTerm": "1",
+        "validDate": "2025-11-01 10:59:45",
+        "expireDate": "2027-01-01 00:00:00",
+        "expireFlag": "0",
+        "flowInfoRes": [
+         {
+          "flowName": "定向流量",
+          "totalRes": "30720",
+          "usedRes": "0",
+          "remainRes": "30720",
+          "unit": "03",
+          "gATFlag": "1",
+          "flowID": "80023",
+          "flowInstanceId": "100001735927926",
+          "flowValidDate": "2025-11-01 10:59:45",
+          "flowExpireDate": "2027-01-01 00:00:00"
+         }
+        ],
+        "appInfoRes": [
+         {
+          "appID": "1750000068",
+          "appTag": "移动云盘前向"
+         }
+        ]
+       },
+       {
+        "planID": "G305401",
+        "planName": "中国移动咪咕快游0元50GB定向流量包（2025版）",
+        "plantype": "01",
+        "isMultiTerm": "1",
+        "validDate": "2026-10-04 09:40:00",
+        "expireDate": "2027-01-01 00:00:00",
+        "expireFlag": "0",
+        "flowInfoRes": [
+         {
+          "flowName": "定向流量",
+          "totalRes": "51200",
+          "usedRes": "0",
+          "remainRes": "51200",
+          "unit": "03",
+          "gATFlag": "1",
+          "flowID": "80023",
+          "flowInstanceId": "100001901920910",
+          "flowValidDate": "2026-10-04 09:40:00",
+          "flowExpireDate": "2027-01-01 00:00:00"
+         }
+        ],
+        "appInfoRes": [
+         {
+          "appID": "1750000034",
+          "appTag": "咪咕游戏"
+         }
+        ]
+       },
+       {
+        "planID": "G238675B",
+        "planName": "0元移动云盘定向流量（会员权益）",
+        "plantype": "03",
+        "isMultiTerm": "1",
+        "validDate": "2025-06-01 04:46:13",
+        "expireDate": "2028-06-01 04:46:13",
+        "expireFlag": "0",
+        "flowInfoRes": [
+         {
+          "flowName": "定向流量",
+          "totalRes": "N",
+          "usedRes": "0",
+          "remainRes": "N",
+          "unit": "03",
+          "gATFlag": "1",
+          "flowID": "7206",
+          "flowInstanceId": "100001575987709",
+          "flowValidDate": "2025-06-01 04:46:13",
+          "flowExpireDate": "2028-06-01 04:46:13"
+         }
+        ],
+        "appInfoRes": [
+         {
+          "appID": "1750000068",
+          "appTag": "移动云盘前向"
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  },
+  "currentTime": "2026-11-20 22:49:17:242"
+ }
+}

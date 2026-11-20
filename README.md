@@ -13,6 +13,7 @@
 | `cmcc_gold.py` | 签到专属AI豆兑换话费券（5元→2元→1.5元→1元 顶格兑） | 每天 1 次 |
 | `cmcc_seckill.py` | 假期限时秒杀（如 5 元话费加赠券） | 仅活动期 |
 | `cmcc_fee.py` | 话费余额查询并推送（会话仅 ~180 秒，须抓完立刻跑，不能进定时任务） | 手动 |
+| `cmcc_flow.py` + `flow.js` | 流量余量 → iPhone 桌面 Widget（每 15 分钟自动刷新，无需再抓包） | Mac 常驻每 15 分钟 |
 | `liaoning/liaoning.py` | [辽宁移动专属活动](docs/liaoning.md)（充值先领券抽奖） | 辽宁号码每天 1 次 |
 
 分省/分活动的详细说明归档在 [docs/](docs/) 目录（如 [辽宁移动活动](docs/liaoning.md)）。
@@ -239,6 +240,44 @@ python3 cmcc_fee.py --config config.json    # 查询并推送话费余额
 
 会话失效后脚本报 `500003` 并提示，重新抓一次即可；查询本身只读。
 
+## 流量 Widget（`cmcc_flow.py` + `flow.js`）
+
+iPhone 桌面小组件实时显示剩余流量、各流量包各自的用量与有效期。Mac 上抓接口、iPhone 上只读一个本地 JSON。
+
+```bash
+python3 cmcc_flow.py --self-test   # 离线自检（用 fixtures/flow_sample.json 验解析）
+python3 cmcc_flow.py --dry-run     # 真抓一次，只打印不落盘
+python3 cmcc_flow.py               # 抓取 + 写 iCloud + 按需推送
+python3 cmcc_flow.py --install-launchd   # 加载 launchd：每 15 分钟，00:00-07:00 自动跳过
+```
+
+数据流：`cmcc_flow.py` 现签会话（复用 `.cmcc_session_<尾号>.json`，**不需要再抓包**）→ 调
+`clientaccess.10086.cn` 的套餐余量接口 → 归一化成 `~/Library/Mobile Documents/iCloud~dk~simonbs~Scriptable/Documents/flow_<尾号>.json`。
+
+装 Widget（一次性）：
+
+1. iPhone 装 [Scriptable](https://apps.apple.com/app/scriptable/id1405459188)（免费）并打开一次；
+2. 把仓库里的 `flow.js` 拷进 Scriptable 的 iCloud 目录：`cp flow.js ~/Library/Mobile\ Documents/iCloud~dk~simonbs~Scriptable/Documents/`；
+3. 长按桌面 → 加 Scriptable 小组件 → 选中号或小号 → 长按组件「编辑」→ Script 选 `flow.js`，Parameter 填手机尾号（如 `9819`）。
+
+显示口径：只统计**通用流量**（`flowtype=0`），定向流量不展示；同一 `planID` 的「上月结转」与本月包合并成一条；
+流量包按**到期时间升序**排（快过期的在前）；**已用尽但未到期的包不展示**（不贡献剩余量，大号末尾只报个数）。
+小号=总量+百分比环；中号=总量+前 3 个包（超出显示「还有 N 个」）+ 最近失效的 1 个；大号=总量+近 7 天日均/按此速度可用天数+全部包。
+
+推送（Bark）：剩余低于 10% 或 1 GB 每天一条；某个流量包用完推一次；连续失败 3 次推一次，恢复后再推一次。
+
+接口与加密（2026-11-20 实测，与 [ha-china-mobile](https://github.com/margrop/ha-china-mobile) 的 `BIZ_KEYS` 一致）：
+
+| 项 | 值 |
+|----|----|
+| 接口 | `POST https://clientaccess.10086.cn/biz-orange/BH/newPlanRemainQry/getNewPlanRemainQry` |
+| 请求体 | `AES-128-CBC(bAIgvwAuA4tbDr9d / 9791027341711819)`；`reqBody.cellNum` 是**明文手机号** |
+| 响应体 | `AES-128-CBC(GS7VelkJl5IT1uwQ / 9791027341711819)`；线上单层 base64，HAR 里是两层 |
+| `x-qen` | `2`（业务接口，登录接口是 `14`） |
+
+关键字段：`planRemianFlowRes[].planRemianFlowInfoRes[]` 的 `planName` / `validDate` / `expireDate` / `expireFlag`，
+以及 `flowInfoRes[]` 的 `totalRes` / `usedRes` / `remainRes` / `unit`（`03`=MB，`04`=GB）。
+
 ## 定时任务
 
 macOS crontab 示例（按需取舍，路径替换为实际目录）：
@@ -252,6 +291,9 @@ macOS crontab 示例（按需取舍，路径替换为实际目录）：
 
 # 每周一 9:17 评价有礼
 17 9 * * 1 cd /path/to/cmcc-auto-checkin && /usr/bin/python3 cmcc_rate.py --exchange >> rate.log 2>&1
+
+# 流量 Widget：每 15 分钟（建议用 `python3 cmcc_flow.py --install-launchd` 装 launchd，休眠时不跑）
+*/15 7-23 * * * cd /path/to/cmcc-auto-checkin && /usr/bin/python3 cmcc_flow.py >> flow.log 2>&1
 ```
 
 分钟刻意避开整点，配合 `--delay` 随机延迟降低风控风险。GitHub Actions 亦可（secrets 里配 `CMCC_APP_TOKEN`、`CMCC_PHONE` 等环境变量即可，无需 config 文件）；注意在 App 内切换账号登录会使 `app_token` 失效，云上定时请留意推送的失败告警。
