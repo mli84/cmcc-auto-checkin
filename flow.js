@@ -2,8 +2,8 @@
 // 数据来自 Mac 上 launchd 每 15 分钟生成的 iCloud 文件，Widget 不联网、不碰凭证。
 // 用法：新建 Scriptable 小组件 → 选本脚本 → 参数填手机尾号（不填默认 9819）。
 //   小号 剩余总量 + 百分比环
-//   中号 总量 + 前 3 个套餐（各自用量与有效期）+ 刚失效的 1 个
-//   大号 总量 + 日均/可用天数 + 全部套餐（各自用量与有效期）
+//   中号 总量 + 前 3 个套餐（各自剩余/总量与有效期）+ 刚失效的 1 个
+//   大号 总量 + 日均/可用天数 + 全部套餐（各自剩余/总量与有效期）
 // 已用尽的包不展示（它只是没到期，不贡献剩余量），大号末尾提示还有几个。
 
 const TAIL = (args.widgetParameter || "9819").trim();
@@ -124,7 +124,7 @@ function packageRow(w, p, tall) {
   row.centerAlignContent();
   label(row, shortName(p.name), Font.systemFont(tall ? 12 : 11), C.line);
   row.addSpacer(6);
-  label(row, `${fmtMB(p.used_mb)}/${fmtMB(p.total_mb)}`, Font.mediumSystemFont(tall ? 12 : 11), C.text);
+  label(row, `${fmtMB(p.remain_mb)}/${fmtMB(p.total_mb)}`, Font.mediumSystemFont(tall ? 12 : 11), C.text);
   label(row, " · " + mmdd(p.expire), Font.systemFont(10), C.faint);
 }
 
