@@ -371,6 +371,16 @@ def invalidate_minted(phone: str) -> None:
     _save_mint(phone, cookie="", dead_streak=streak)
 
 
+def _record_mint_ok(phone: str, cookie: str) -> None:
+    """现签成功：只刷新 cookie/ts 与风控静默，**不动** dead_streak。
+
+    业务侧 410000/210000 必然紧跟在一次现签之后（先用现签会话，再被判失效），
+    这里若把计数清零，连续失效计数永远封顶 1，退避阈值就形同虚设。
+    计数只由业务成功（note_session_ok）清零。
+    """
+    _save_mint(phone, cookie=cookie, ts=time.time(), blocked_until=0, blocked_code="")
+
+
 def note_session_ok(phone: str) -> None:
     """业务接口成功一次，清零连续失效计数（否则计数会一直累积到误退避）。"""
     if _load_mint(phone).get("dead_streak"):
@@ -459,8 +469,7 @@ def mint_cookie(profile: dict, timeout: int = 25) -> str | None:
     LAST_ERROR.clear()  # 成功即清掉上一轮风控码，否则后续失败会误报「已静默」
     if cookie:
         _MINTED[key] = (time.time(), cookie)
-        _save_mint(key, cookie=cookie, ts=time.time(), blocked_until=0, blocked_code="",
-                   dead_streak=0)
+        _record_mint_ok(key, cookie)
     return cookie
 
 
@@ -517,8 +526,7 @@ def refresh(profile: dict, timeout: int = 25, config_path: str = "",
         profile["saved_at"] = time.time()
         save_profile(profile)
         _MINTED[phone] = (time.time(), new_cookie)
-        _save_mint(phone, cookie=new_cookie, ts=time.time(), blocked_until=0, blocked_code="",
-                   dead_streak=0)
+        _record_mint_ok(phone, new_cookie)
         LAST_ERROR.clear()
         # 顺带回写 config.json 的 app_token：新会话可直接用于 appTokenLogin
         if config_path and update_config_token(config_path, profile["phone"], new_cookie):
@@ -625,12 +633,15 @@ def _self_test_throttle() -> None:
         # 原子写：写完只剩状态文件本身，没有遗留 .tmp（并发进程不会读到半截）
         assert [p.name for p in ROOT.iterdir() if p.name.endswith(".tmp")] == [], list(ROOT.iterdir())
 
-        # 连续失效退避：前两次只清缓存，达阈值才封停；业务成功一次即清零
+        # 连续失效退避（真实路径：现签成功 → 业务判失效 → 现签 → …）：
+        # 现签成功不清计数，前两次只清缓存，第 3 次才封停；业务成功一次即清零。
         _save_mint(phone, cookie="JSESSIONID=b", ts=now_real, blocked_until=0,
                    blocked_code="", dead_streak=0)
         invalidate_minted(phone)
         invalidate_minted(phone)
-        assert not _load_mint(phone).get("blocked_until")
+        assert not _load_mint(phone).get("blocked_until"), _load_mint(phone)
+        _record_mint_ok(phone, "JSESSIONID=b2")  # 每次失效前必有一次现签，不能清零计数
+        assert int(_load_mint(phone)["dead_streak"]) == 2, _load_mint(phone)
         invalidate_minted(phone)
         assert _load_mint(phone)["blocked_code"] == "session-dead", _load_mint(phone)
         assert mint_blocked_reason(phone, now_real) != ""
