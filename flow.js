@@ -2,7 +2,7 @@
 // 数据来自 Mac 上 launchd 每 15 分钟生成的 iCloud 文件，Widget 不联网、不碰凭证。
 // 用法：新建 Scriptable 小组件 → 选本脚本 → 参数填手机尾号（不填默认 9819）。
 //   小号 剩余总量 + 百分比环
-//   中号 总量 + 前 3 个套餐（各自剩余/总量与有效期）+ 最近失效/用完的 1 个（带时间）
+//   中号 总量进度环 + 右侧彩色分段环（各包剩余量占比，圆心为整体可用比例）+ 前 3 个套餐（圆点与环同色）+ 最近失效/用完的 1 个
 //   大号 总量 + 日均/可用天数 + 全部套餐（各自剩余/总量与有效期）
 // 已用尽的包不展示（它只是没到期，不贡献剩余量），大号末尾提示还有几个。
 
@@ -24,6 +24,12 @@ const DARK = {
 const S = Device.isDarkMode ? DARK : LIGHT;
 const C = {};
 for (const k in DARK) C[k] = Color.dynamic(new Color(LIGHT[k]), new Color(DARK[k]));
+
+// 中号环里每个包一个颜色，与下方包名前的圆点一一对应；超出调色板的包归入灰色「其它」。
+const SEG = Device.isDarkMode
+  ? ["#60a5fa", "#4ade80", "#fbbf24", "#f472b6", "#a78bfa", "#22d3ee"]
+  : ["#2563eb", "#16a34a", "#d97706", "#db2777", "#7c3aed", "#0891b2"];
+const SEG_REST = Device.isDarkMode ? "#64748b" : "#94a3b8";
 
 function fmtMB(mb) {
   if (mb == null) return "—";
@@ -106,6 +112,12 @@ function logLine(text) {
   } catch (e) {}
 }
 
+// Scriptable 没有 Script.sleep；用忙等让 iCloud 下载落地后再读一次。
+function wait(ms) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {}
+}
+
 function readJSON(path) {
   const info = { exists: false, downloaded: false, dl: "skip", raw: 0, tries: 0 };
   for (let attempt = 1; attempt <= 2; attempt++) {
@@ -136,15 +148,15 @@ function readJSON(path) {
         info.dl += " parse:" + String(e).slice(0, 80);
       }
     }
-    if (attempt === 1) Script.sleep(1);
+    if (attempt === 1) wait(1000);
   }
   return { data: null, info };
 }
 
-function arcPoints(c, r, sweep, steps) {
+function arcPoints(c, r, start, sweep, steps) {
   const pts = [];
   for (let i = 0; i <= steps; i++) {
-    const a = -Math.PI / 2 + (sweep * i) / steps;
+    const a = start + (sweep * i) / steps;
     pts.push(new Point(c + r * Math.cos(a), c + r * Math.sin(a)));
   }
   return pts;
@@ -164,12 +176,53 @@ function ring(size, ratio, color) {
   const sweep = Math.PI * 2 * Math.min(Math.max(ratio, 0), 1);
   if (sweep > 0.05) {
     const p = new Path();
-    p.addLines(arcPoints(size / 2, (size - inset * 2) / 2, sweep, Math.max(10, Math.round(sweep / 0.06))));
+    p.addLines(arcPoints(size / 2, (size - inset * 2) / 2, -Math.PI / 2, sweep, Math.max(10, Math.round(sweep / 0.06))));
     dc.addPath(p);
     dc.setStrokeColor(new Color(color));
     dc.setLineWidth(lw);
     dc.strokePath();
   }
+  return dc.getImage();
+}
+
+// 中号：按各包剩余量占比把整圈切成彩色扇段，圆心写整体可用比例。
+function segmentRing(size, segs, pct) {
+  const dc = new DrawContext();
+  dc.size = new Size(size, size);
+  dc.opaque = false;
+  dc.respectScreenScale = true;
+  const lw = Math.max(4, Math.round(size / 9));
+  const inset = lw / 2 + 1;
+  const r = (size - inset * 2) / 2;
+  const c = size / 2;
+  dc.setLineWidth(lw);
+  if (!segs.length) {
+    dc.setStrokeColor(new Color(S.track));
+    dc.strokeEllipse(new Rect(inset, inset, size - inset * 2, size - inset * 2));
+  }
+  const total = segs.reduce((s, x) => s + x.ratio, 0) || 1;
+  const gap = segs.length > 1 ? 0.05 : 0;
+  let start = -Math.PI / 2;
+  for (const s of segs) {
+    const full = (Math.PI * 2 * s.ratio) / total;
+    const sweep = full - gap;
+    if (sweep > 0.02) {
+      const p = new Path();
+      p.addLines(arcPoints(c, r, start + gap / 2, sweep, Math.max(6, Math.round(sweep / 0.06))));
+      dc.addPath(p);
+      dc.setStrokeColor(new Color(s.hex));
+      dc.setLineWidth(lw);
+      dc.strokePath();
+    }
+    start += full;
+  }
+  dc.setTextAlignedCenter();
+  dc.setTextColor(new Color(S.text));
+  dc.setFont(Font.boldSystemFont(13));
+  dc.drawTextInRect(pct, new Rect(0, c - 17, size, 16));
+  dc.setTextColor(new Color(S.dim));
+  dc.setFont(Font.systemFont(8));
+  dc.drawTextInRect("可用", new Rect(0, c + 1, size, 10));
   return dc.getImage();
 }
 
@@ -182,7 +235,7 @@ function label(stack, text, font, color) {
   return t;
 }
 
-function header(w, data, ratio, age, size) {
+function header(w, data, ratio, age, size, segs) {
   const stale = data.ok === false || age > 3600;
   const row = w.addStack();
   row.layoutHorizontally();
@@ -191,6 +244,11 @@ function header(w, data, ratio, age, size) {
     const img = row.addImage(ring(size, ratio, stale ? S.warn : S.ok));
     img.imageSize = new Size(size, size);
     row.addSpacer(10);
+    if (segs) {
+      const simg = row.addImage(segmentRing(size, segs, `${Math.round(ratio * 100)}%`));
+      simg.imageSize = new Size(size, size);
+      row.addSpacer(10);
+    }
   } catch (e) {
     row.addSpacer(0);
   }
@@ -203,10 +261,16 @@ function header(w, data, ratio, age, size) {
         Font.systemFont(10), stale ? C.warn : C.dim);
 }
 
-function packageRow(w, p, tall) {
+function packageRow(w, p, tall, hex) {
   const row = w.addStack();
   row.layoutHorizontally();
   row.centerAlignContent();
+  if (hex) {
+    const dot = row.addText("●");
+    dot.font = Font.systemFont(7);
+    dot.textColor = new Color(hex);
+    row.addSpacer(4);
+  }
   label(row, shortName(p.name), Font.systemFont(tall ? 12 : 11), C.line);
   row.addSpacer(6);
   label(row, `${fmtMB(p.remain_mb)}/${fmtMB(p.total_mb)}`, Font.mediumSystemFont(tall ? 12 : 11), C.text);
@@ -224,13 +288,27 @@ function build(data) {
   const ratio = total ? remain / total : 0;
   const age = Math.round(Date.now() / 1000 - data.updated_at);
 
-  header(w, data, ratio, age, FAMILY === "small" ? 50 : FAMILY === "large" ? 66 : 58);
-
   const pkgs = data.packages || [];
   // 快照可能是几小时前的（Mac 抓取失败时保留上一份），已过期的包不能再当成"在用"展示
   const nowMs = Date.now();
   const live = pkgs.filter((p) => p.remain_mb > 0 && !(p.expire && Date.parse(p.expire.replace(" ", "T")) < nowMs));
   const drained = pkgs.length - live.length;
+
+  // 分段环只给中号：前 MAX_ROWS 个包各占一色，其余包合并成灰色「其它」，整圈正好 100%。
+  let segs = null;
+  let restShare = 0;
+  if (FAMILY === "medium" && live.length) {
+    const liveRemain = live.reduce((s, p) => s + p.remain_mb, 0);
+    const top = live.slice(0, MAX_ROWS);
+    const topRemain = top.reduce((s, p) => s + p.remain_mb, 0);
+    segs = top.map((p, i) => ({ ratio: p.remain_mb / liveRemain, hex: SEG[i % SEG.length] }));
+    if (liveRemain > topRemain) {
+      restShare = Math.round(((liveRemain - topRemain) / liveRemain) * 100);
+      segs.push({ ratio: (liveRemain - topRemain) / liveRemain, hex: SEG_REST });
+    }
+  }
+
+  header(w, data, ratio, age, FAMILY === "small" ? 50 : FAMILY === "large" ? 66 : 58, segs);
 
   if (MAX_ROWS) {
     if (FAMILY === "large" && data.avg_daily_mb_7d) {
@@ -243,12 +321,13 @@ function build(data) {
     if (!live.length) {
       label(w, "没有可用流量包", Font.mediumSystemFont(12), C.warn);
     }
-    for (const p of live.slice(0, MAX_ROWS)) {
-      packageRow(w, p, FAMILY === "large");
+    for (const [i, p] of live.slice(0, MAX_ROWS).entries()) {
+      packageRow(w, p, FAMILY === "large", FAMILY === "medium" ? SEG[i % SEG.length] : null);
       w.addSpacer(FAMILY === "large" ? 4 : 3);
     }
     if (live.length > MAX_ROWS) {
-      label(w, `还有 ${live.length - MAX_ROWS} 个`, Font.systemFont(10), C.faint);
+      const more = `还有 ${live.length - MAX_ROWS} 个`;
+      label(w, restShare ? `${more} · ${restShare}%` : more, Font.systemFont(10), C.faint);
     }
     if (FAMILY === "large" && drained > 0) {
       label(w, `另有 ${drained} 个已用完（未到期）`, Font.systemFont(10), C.faint);
