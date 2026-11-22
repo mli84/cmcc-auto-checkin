@@ -2,7 +2,7 @@
 // 数据来自 Mac 上 launchd 每 15 分钟生成的 iCloud 文件，Widget 不联网、不碰凭证。
 // 用法：新建 Scriptable 小组件 → 选本脚本 → 参数填手机尾号（不填默认 9819）。
 //   小号 剩余总量 + 百分比环
-//   中号 总量 + 前 3 个套餐（各自剩余/总量与有效期）+ 刚失效的 1 个
+//   中号 总量 + 前 3 个套餐（各自剩余/总量与有效期）+ 最近失效/用完的 1 个（带时间）
 //   大号 总量 + 日均/可用天数 + 全部套餐（各自剩余/总量与有效期）
 // 已用尽的包不展示（它只是没到期，不贡献剩余量），大号末尾提示还有几个。
 
@@ -46,6 +46,41 @@ function expiry(dateStr) {
   return `${+m[2]}-${+m[3]}${hm} 到期`;
 }
 
+function pastMoment(dateStr, suffix) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2}))?/.exec(dateStr || "");
+  if (!m) return "";
+  const hm = m[4] ? ` ${m[4]}:${m[5]}` : "";
+  const d = new Date(+m[1], +m[2] - 1, +m[3]);
+  const today = new Date();
+  const diff = Math.round((d - new Date(today.getFullYear(), today.getMonth(), today.getDate())) / 86400000);
+  if (diff === 0) return `今天${hm} ${suffix}`;
+  if (diff === -1) return `昨天${hm} ${suffix}`;
+  return `${+m[2]}-${+m[3]}${hm} ${suffix}`;
+}
+
+function stampOf(sec, withSec) {
+  const d = new Date(sec * 1000);
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ` +
+         `${p(d.getHours())}:${p(d.getMinutes())}` + (withSec ? ":" + p(d.getSeconds()) : "");
+}
+
+// 接口只有"失效时间"，"用完时间"是 Mac 首次看到归零的那次快照，两者比新旧取最近的一个。
+function recentLine(data) {
+  const gone = data.expired_last;
+  const done = data.drained_last;
+  const goneMs = gone ? Date.parse(String(gone.expire || "").replace(" ", "T")) || 0 : 0;
+  const doneMs = done && done.at ? done.at * 1000 : 0;
+  if (done && doneMs > goneMs) {
+    return `已用完：${shortName(done.name)} ${fmtMB(done.total_mb)} · ${pastMoment(stampOf(done.at), "用完")}`;
+  }
+  if (gone) {
+    const t = pastMoment(gone.expire, "失效");
+    return `刚失效：${shortName(gone.name)} ${fmtMB(gone.total_mb)}${t ? " · " + t : ""}`;
+  }
+  return "";
+}
+
 function ago(sec) {
   if (!sec) return "从未更新";
   if (sec < 0) return "刚刚";
@@ -57,12 +92,6 @@ function ago(sec) {
 
 // Widget 跑在手机上，Mac 看不到它的日志，所以把每次读取结果写进 iCloud 同目录的
 // flow_widget_<尾号>.log，Mac 上直接 tail 就能判断是「文件没同步过来」还是「下载失败」。
-function stamp() {
-  const d = new Date();
-  const p = (n) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
-}
-
 function logLine(text) {
   try {
     const p = fm.joinPath(fm.documentsDirectory(), `flow_widget_${TAIL}.log`);
@@ -73,7 +102,7 @@ function logLine(text) {
     }
     // 只留最近一段，15 分钟一次也不会把 iCloud 撑大
     if (old.length > 16000) old = old.slice(-12000);
-    fm.writeString(p, `${old}${stamp()} ${FAMILY} ${text}\n`);
+    fm.writeString(p, `${old}${stampOf(Date.now() / 1000, true)} ${FAMILY} ${text}\n`);
   } catch (e) {}
 }
 
@@ -224,10 +253,8 @@ function build(data) {
     if (FAMILY === "large" && drained > 0) {
       label(w, `另有 ${drained} 个已用完（未到期）`, Font.systemFont(10), C.faint);
     }
-    if (data.expired_last) {
-      label(w, `刚失效：${shortName(data.expired_last.name)} ${fmtMB(data.expired_last.total_mb)}`,
-            Font.systemFont(9), C.faint);
-    }
+    const recent = recentLine(data);
+    if (recent) label(w, recent, Font.systemFont(9), C.faint);
   }
 
   if (data.ok === false) {

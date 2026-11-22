@@ -276,18 +276,24 @@ def snapshot_and_push(snap: dict, state: dict, tail: str, bark_url: str, now: fl
         notify(bark_url, "流量快用完了", f"剩余 {remain:.0f} MB（{remain / total * 100:.0f}%），共 {total / 1024:.1f} GB")
         pushes["low"] = today
 
-    before = {p["id"]: p["remain_mb"] for p in state.get("packages", [])}
-    for pid, was in before.items():
-        if was <= 0:
+    before = {p["id"]: p for p in state.get("packages", [])}
+    for pid, old in before.items():
+        if old["remain_mb"] <= 0:
             continue
         now_remain = next((p["remain_mb"] for p in snap["packages"] if p["id"] == pid), None)
         if now_remain is None or now_remain <= 0:      # 用完了，或整包从列表消失
-            name = next((p["name"] for p in state["packages"] if p["id"] == pid), pid)
+            name = old.get("name") or pid
             key = f"done:{pid}"
             if not pushes.get(key):
                 notify(bark_url, "流量包用完了", name)
                 pushes[key] = today
+            # 接口不给"用完时间"，只能记首次观测到归零的快照时间（15 分钟粒度）
+            state["drained_last"] = {"id": pid, "name": name,
+                                     "total_mb": old.get("total_mb"), "at": int(now)}
     state["packages"] = snap["packages"]
+    drained = state.get("drained_last")
+    if drained and now - drained["at"] < 7 * 86400:
+        snap["drained_last"] = drained
 
 
 # ------------------------------------------------------------------ 主流程
@@ -404,6 +410,15 @@ def self_test() -> int:
                            "packages": []}, state, "0000", "", now=1795000000 + i * day)
     assert [d.get("used_mb") for d in state["daily"]] == [None, 500.0, 300.0], state["daily"]
     assert snap and state["daily"][-1]["cum_mb"] == 1800.0
+
+    pkg = {"id": "X", "name": "日包", "total_mb": 2048.0, "remain_mb": 10.0, "expire": "2026-11-23 08:00:00"}
+    drain = {"fail": 0, "pushes": {}, "daily": []}
+    snapshot_and_push({"total": {"total_mb": 2048.0, "used_mb": 2038.0, "remain_mb": 10.0},
+                       "packages": [pkg]}, drain, "0000", "", now=1795000000)
+    assert "drained_last" not in drain, "没归零不算用完"
+    snapshot_and_push({"total": {"total_mb": 2048.0, "used_mb": 2048.0, "remain_mb": 0.0},
+                       "packages": [dict(pkg, remain_mb=0.0)]}, drain, "0000", "", now=1795000900)
+    assert drain["drained_last"]["id"] == "X" and drain["drained_last"]["at"] == 1795000900, drain
 
     seq, calls = iter(["410000", "000000"]), []
     saved = (_query, cs.mint_cookie, cs.invalidate_minted, cs.note_session_ok)
