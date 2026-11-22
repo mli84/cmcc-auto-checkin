@@ -263,7 +263,7 @@ iPhone 桌面小组件实时显示剩余流量、各流量包各自的用量与�
 python3 cmcc_flow.py --self-test   # 离线自检（用 fixtures/flow_sample.json 验解析）
 python3 cmcc_flow.py --dry-run     # 真抓一次，只打印不落盘
 python3 cmcc_flow.py               # 抓取 + 写 iCloud + 按需推送
-python3 cmcc_flow.py --install-launchd   # 加载 launchd：每 15 分钟，00:00-07:00 自动跳过
+python3 cmcc_flow.py --install-launchd   # 同步 flow.js + 加载 launchd：每 15 分钟，00:00-07:00 自动跳过
 ```
 
 数据流：`cmcc_flow.py` 复用 `cmcc_session` 落盘的会话（8 小时窗口，**不需要再抓包**；只有接口回
@@ -273,7 +273,7 @@ python3 cmcc_flow.py --install-launchd   # 加载 launchd：每 15 分钟，00:0
 装 Widget（一次性）：
 
 1. iPhone 装 [Scriptable](https://apps.apple.com/app/scriptable/id1405459188)（免费）并打开一次；
-2. 把仓库里的 `flow.js` 拷进 Scriptable 的 iCloud 目录：`cp flow.js ~/Library/Mobile\ Documents/iCloud~dk~simonbs~Scriptable/Documents/`；
+2. `--install-launchd` 会顺带把 `flow.js` 拷进 Scriptable 的 iCloud 目录，之后改脚本重跑一次即可同步；
 3. 长按桌面 → 加 Scriptable 小组件 → 选中号或小号 → 长按组件「编辑」→ Script 选 `flow.js`，Parameter 填手机尾号（如 `9819`）。
 
 显示口径：只统计**通用流量**（`flowtype=0`），定向流量不展示；同一 `planID` 的「上月结转」与本月包合并成一条；

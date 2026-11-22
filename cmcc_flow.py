@@ -28,6 +28,7 @@ import json
 import os
 import random
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -360,6 +361,11 @@ def install_launchd(config_path: str) -> int:
     target = Path.home() / "Library/LaunchAgents" / f"{label}.plist"
     target.write_text(PLIST.format(tail=tail, python=sys.executable, script=here / "cmcc_flow.py",
                                    config=Path(config_path).resolve(), cwd=here))
+    if ICLOUD.exists():
+        shutil.copy2(here / "flow.js", ICLOUD / "flow.js")
+        print(f"已同步 flow.js → {ICLOUD / 'flow.js'}")
+    else:
+        print(f"找不到 {ICLOUD}：先在 iPhone 装 Scriptable 并打开一次，再重跑本命令", file=sys.stderr)
     subprocess.run(["launchctl", "unload", str(target)], check=False, capture_output=True)
     subprocess.run(["launchctl", "load", str(target)], check=True)
     print(f"已加载 {target}（每 900 秒；00:00-07:00 自动跳过）")
