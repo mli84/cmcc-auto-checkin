@@ -53,6 +53,7 @@ import base64
 import hashlib
 import json
 import logging
+import os
 import random
 import re
 import ssl
@@ -107,6 +108,8 @@ RISK_SILENCE = {             # 命中风控码后的静默时长：继续登录�
     "214100": 2 * 3600,      # 请求疑似存在风险，需完成验证
     "214103": 24 * 3600,     # 登录过于频繁，需人脸识别解封
 }
+DEAD_BACKOFF_AFTER = 3       # 业务侧连续这么多次判定会话失效后停止重签
+DEAD_BACKOFF = 6 * 3600      # 退避时长：每次重签都是一次登录，持续重试只会拖长封控
 # 最近一次自动登录失败信息（供调用方把真实原因拼进报错，避免误导用户去重新抓包）
 LAST_ERROR: dict = {}
 
@@ -304,10 +307,24 @@ def _load_mint(phone: str) -> dict:
 def _save_mint(phone: str, **fields) -> dict:
     st = _load_mint(phone)
     st.update(fields)
+    path = mint_state_file(phone)
+    tmp = None
     try:
-        mint_state_file(phone).write_text(json.dumps(st, ensure_ascii=False), encoding="utf-8")
+        # 临时文件 + os.replace：并发进程（Widget 每 15 分钟 / 定时脚本）读不到空或
+        # 半截 JSON，否则时间戳丢失会让最短现签间隔失效，两个进程同时现签即风控诱因。
+        fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".", suffix=".tmp")
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(json.dumps(st, ensure_ascii=False))
+        os.replace(tmp, path)
+        tmp = None
     except OSError as e:
         log.warning("现签状态写入失败: %s", e)
+    finally:
+        if tmp:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
     return st
 
 
@@ -337,10 +354,27 @@ def mint_blocked_reason(phone: str, now: float | None = None) -> str:
 
 
 def invalidate_minted(phone: str) -> None:
-    """会话被服务端拒绝时清掉缓存；冷却仍在，避免失败后立刻补签。"""
+    """会话被服务端拒绝时清掉缓存；冷却仍在，避免失败后立刻补签。
+
+    连续失效达阈值则退避：业务接口持续报会话失效时，每轮运行都重签等于反复登录，
+    只会把封控拖长（最坏 1 次/10 分钟 = 144 次/天）。
+    """
     _MINTED.pop(phone, None)
-    if _load_mint(phone).get("cookie"):
-        _save_mint(phone, cookie="")
+    st = _load_mint(phone)
+    streak = int(st.get("dead_streak") or 0) + 1
+    if streak >= DEAD_BACKOFF_AFTER:
+        _save_mint(phone, cookie="", ts=time.time(), dead_streak=streak,
+                   blocked_until=time.time() + DEAD_BACKOFF, blocked_code="session-dead")
+        log.error("会话连续 %d 次被判失效，暂停现签 %.0f 小时（避免把封控拖长）",
+                  streak, DEAD_BACKOFF / 3600)
+        return
+    _save_mint(phone, cookie="", dead_streak=streak)
+
+
+def note_session_ok(phone: str) -> None:
+    """业务接口成功一次，清零连续失效计数（否则计数会一直累积到误退避）。"""
+    if _load_mint(phone).get("dead_streak"):
+        _save_mint(phone, dead_streak=0)
 
 
 def risk_blocked_until(phone: str) -> float:
@@ -382,7 +416,9 @@ def mint_cookie(profile: dict, timeout: int = 25) -> str | None:
 
     cached = reusable_cookie(key, now)
     if cached:
-        _MINTED[key] = (now, cached)
+        # 复用起点沿用磁盘上 cookie 的原始 ts，不能重置为 now（否则 8h 窗口重新起算，
+        # 进程内会一直用到服务端已回收的过期会话）。
+        _MINTED[key] = (float(_load_mint(key).get("ts") or now), cached)
         return cached
 
     reason = mint_blocked_reason(key, now)
@@ -420,21 +456,25 @@ def mint_cookie(profile: dict, timeout: int = 25) -> str | None:
         _record_risk(key, code)
         return None
     cookie = r.headers.get("Set-Cookie")
+    LAST_ERROR.clear()  # 成功即清掉上一轮风控码，否则后续失败会误报「已静默」
     if cookie:
         _MINTED[key] = (time.time(), cookie)
-        _save_mint(key, cookie=cookie, ts=time.time(), blocked_until=0, blocked_code="")
+        _save_mint(key, cookie=cookie, ts=time.time(), blocked_until=0, blocked_code="",
+                   dead_streak=0)
     return cookie
 
 
-def refresh(profile: dict, timeout: int = 25, config_path: str = "") -> dict:
+def refresh(profile: dict, timeout: int = 25, config_path: str = "",
+            force: bool = False) -> dict:
     """现签一张新会话并把 cookie / 有效期回写 profile（可选回写 config）。
 
+    force=True 忽略现签冷却与风控静默（仅手动 --refresh --force 用）。
     返回 {ok, retCode, validityTerm, cookie} 或 {ok:False, reason, retCode, dead}。
     """
     phone = str(profile.get("phone") or "")
-    reason = mint_blocked_reason(phone)
+    reason = "" if force else mint_blocked_reason(phone)
     if reason:
-        return {"ok": False, "reason": f"跳过现签：{reason}"}
+        return {"ok": False, "reason": f"跳过现签：{reason}（确需换会话加 --refresh --force）"}
 
     url = profile["url"]
     # 明文必须与 xs 用同一份字符串，故统一从这里重建
@@ -477,7 +517,9 @@ def refresh(profile: dict, timeout: int = 25, config_path: str = "") -> dict:
         profile["saved_at"] = time.time()
         save_profile(profile)
         _MINTED[phone] = (time.time(), new_cookie)
-        _save_mint(phone, cookie=new_cookie, ts=time.time(), blocked_until=0, blocked_code="")
+        _save_mint(phone, cookie=new_cookie, ts=time.time(), blocked_until=0, blocked_code="",
+                   dead_streak=0)
+        LAST_ERROR.clear()
         # 顺带回写 config.json 的 app_token：新会话可直接用于 appTokenLogin
         if config_path and update_config_token(config_path, profile["phone"], new_cookie):
             log.info("已回写 %s 的 app_token", config_path)
@@ -579,6 +621,29 @@ def _self_test_throttle() -> None:
         assert st["blocked_code"] == "214100", st
         assert abs(st["blocked_until"] - (now_real + RISK_SILENCE["214100"])) < 5, st
         assert mint_blocked_reason(phone, now_real) != ""
+
+        # 原子写：写完只剩状态文件本身，没有遗留 .tmp（并发进程不会读到半截）
+        assert [p.name for p in ROOT.iterdir() if p.name.endswith(".tmp")] == [], list(ROOT.iterdir())
+
+        # 连续失效退避：前两次只清缓存，达阈值才封停；业务成功一次即清零
+        _save_mint(phone, cookie="JSESSIONID=b", ts=now_real, blocked_until=0,
+                   blocked_code="", dead_streak=0)
+        invalidate_minted(phone)
+        invalidate_minted(phone)
+        assert not _load_mint(phone).get("blocked_until")
+        invalidate_minted(phone)
+        assert _load_mint(phone)["blocked_code"] == "session-dead", _load_mint(phone)
+        assert mint_blocked_reason(phone, now_real) != ""
+        note_session_ok(phone)
+        assert int(_load_mint(phone).get("dead_streak") or 0) == 0
+
+        # 磁盘缓存命中时复用起点必须沿用原始 ts，否则窗口会从 now 重新起算
+        _MINTED.clear()
+        _save_mint(phone, cookie="JSESSIONID=c", ts=now_real - 300, blocked_until=0,
+                   blocked_code="", dead_streak=0)
+        assert mint_cookie({"phone": phone}) == "JSESSIONID=c"
+        assert abs(_MINTED[phone][0] - (now_real - 300)) < 5, _MINTED[phone]
+        _MINTED.clear()
     finally:
         ROOT = old_root
 
@@ -594,6 +659,8 @@ def main() -> int:
     ap.add_argument("--config", default="", help="现签成功后回写该 config.json 的 app_token")
     ap.add_argument("--print-template", action="store_true",
                     help="打印 autoLogin 明文模板（JSON），供复制进 config.json 的 session_template")
+    ap.add_argument("--force", action="store_true",
+                    help="配 --refresh 用：忽略现签冷却与风控静默，强制现签一次")
     ap.add_argument("--timeout", type=int, default=25)
     ap.add_argument("--self-test", action="store_true", help="离线自检加密链路")
     args = ap.parse_args()
@@ -622,7 +689,7 @@ def main() -> int:
         print(json.dumps(profile["template"], ensure_ascii=False, indent=2))
         return 0
 
-    res = refresh(profile, args.timeout, args.config)
+    res = refresh(profile, args.timeout, args.config, args.force)
     if res["ok"]:
         log.info("现签成功：%s %s，%s", res.get("province") or "",
                  res.get("city") or "", describe(profile))

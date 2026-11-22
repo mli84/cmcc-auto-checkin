@@ -120,9 +120,10 @@ def fetch(profile: dict, timeout: int = 25) -> dict:
     code = str(out.get("retCode"))
     if code != "000000":
         if code in SESSION_DEAD:
-            # 会话被服务端回收/顶号：清掉复用缓存，下次跑重新现签（仍受最短间隔约束）
+            # 会话被服务端回收/顶号：清掉复用缓存并计数，连续失效达阈值后停止重签
             cs.invalidate_minted(str(profile.get("phone") or ""))
         raise RuntimeError(f"{code} {out.get('retDesc') or ''}".strip())
+    cs.note_session_ok(str(profile.get("phone") or ""))
     return out
 
 
