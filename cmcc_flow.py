@@ -15,7 +15,8 @@ Scriptable 目录；Widget 只读本地文件，凭证与签名全部留在 Mac 
   明文 reqBody.cellNum 是**明文手机号**（不是登录接口那个 RSA cellNum）
   xs    = md5(url_明文_SALT)
   x-token = base64(AES(xk_path_x-time_x-nonce))，xk 取自 .cmcc_session_<尾号>.json
-  会话由 cmcc_session.mint_cookie() 现签，无需人工抓包、无需保活
+  会话由 cmcc_session.mint_cookie() 提供：落盘结果跨进程复用 8 小时（MINT_TTL），
+  只有业务接口回 410000 或真机 App 重登顶号时才清缓存重签；无需人工抓包、无需保活
 """
 
 from __future__ import annotations

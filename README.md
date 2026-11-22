@@ -266,7 +266,8 @@ python3 cmcc_flow.py               # 抓取 + 写 iCloud + 按需推送
 python3 cmcc_flow.py --install-launchd   # 加载 launchd：每 15 分钟，00:00-07:00 自动跳过
 ```
 
-数据流：`cmcc_flow.py` 现签会话（复用 `.cmcc_session_<尾号>.json`，**不需要再抓包**）→ 调
+数据流：`cmcc_flow.py` 复用 `cmcc_session` 落盘的会话（8 小时窗口，**不需要再抓包**；只有接口回
+`410000` 或真机 App 重新登录把会话顶掉时才清缓存重签）→ 调
 `clientaccess.10086.cn` 的套餐余量接口 → 归一化成 `~/Library/Mobile Documents/iCloud~dk~simonbs~Scriptable/Documents/flow_<尾号>.json`。
 
 装 Widget（一次性）：
