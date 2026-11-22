@@ -78,27 +78,38 @@ function logLine(text) {
 }
 
 function readJSON(path) {
-  // 未下载的 iCloud 文件 fileExists 可能先返回 false，先尝试下载再判断
-  const info = { exists: false, downloaded: false, dl: "skip" };
-  try {
+  const info = { exists: false, downloaded: false, dl: "skip", raw: 0, tries: 0 };
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    info.tries = attempt;
     info.exists = fm.fileExists(path);
-    info.downloaded = fm.isFileDownloaded(path);
-    if (!info.downloaded) {
+    info.downloaded = info.exists && fm.isFileDownloaded(path);
+    try {
+      // isFileDownloaded 会在文件没落地时也报 true，此时 readString 静默返回 null，
+      // JSON.parse(null) === null 会被误判成「文件不存在」；所以每次读之前都强制下载一次
       fm.downloadFileFromiCloud(path);
       info.dl = "ok";
-      info.downloaded = fm.isFileDownloaded(path);
-      info.exists = fm.fileExists(path);
+    } catch (e) {
+      info.dl = "dl:" + String(e).slice(0, 80);
     }
-  } catch (e) {
-    info.dl = "err:" + String(e).slice(0, 100);
+    let raw = null;
+    try {
+      raw = fm.readString(path);
+    } catch (e) {
+      info.dl += " read:" + String(e).slice(0, 60);
+    }
+    info.raw = raw ? raw.length : 0;
+    if (raw) {
+      try {
+        const d = JSON.parse(raw);
+        if (d && d.total) return { data: d, info };
+        info.dl += " shape:" + (d && typeof d === "object" ? Object.keys(d).join("/") : String(d)).slice(0, 60);
+      } catch (e) {
+        info.dl += " parse:" + String(e).slice(0, 80);
+      }
+    }
+    if (attempt === 1) Script.sleep(1);
   }
-  if (!fm.fileExists(path)) return { data: null, info };
-  try {
-    return { data: JSON.parse(fm.readString(path)), info };
-  } catch (e) {
-    info.dl = "parse:" + String(e).slice(0, 100);
-    return { data: { ok: false, error: "JSON 解析失败", updated_at: 0 }, info };
-  }
+  return { data: null, info };
 }
 
 function arcPoints(c, r, sweep, steps) {
@@ -265,13 +276,14 @@ if (!data || !data.total) {
     dir = fm.listContents(fm.documentsDirectory())
            .filter((n) => n.startsWith("flow_") && n.includes(".json")).join(",");
   } catch (e) {}
-  logLine(`MISS exists=${info.exists} downloaded=${info.downloaded} dl=${info.dl} dir=[${dir}]`);
+  logLine(`MISS exists=${info.exists} downloaded=${info.downloaded} raw=${info.raw} tries=${info.tries} dl=${info.dl} dir=[${dir}]`);
   Script.setWidget(placeholder(
     data ? `还没有数据\n${data.error || ""}\n在 Mac 上先跑 cmcc_flow.py`
-         : `还没有 flow_${TAIL}.json\n在 Mac 上先跑一次\npython3 cmcc_flow.py`,
+      : info.exists ? "iCloud 文件还没同步下来\n稍后自动重试"
+      : `还没有 flow_${TAIL}.json\n在 Mac 上先跑一次\npython3 cmcc_flow.py`,
     data ? C.warn : C.dim));
 } else {
-  logLine(`OK remain=${data.total.remain_mb} updated_at=${data.updated_at} uploaded=${info.downloaded} dl=${info.dl}`);
+  logLine(`OK remain=${data.total.remain_mb} updated_at=${data.updated_at} raw=${info.raw} tries=${info.tries} dl=${info.dl}`);
   Script.setWidget(build(data));
 }
 Script.complete();
