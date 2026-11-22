@@ -276,22 +276,33 @@ def snapshot_and_push(snap: dict, state: dict, tail: str, bark_url: str, now: fl
         notify(bark_url, "流量快用完了", f"剩余 {remain:.0f} MB（{remain / total * 100:.0f}%），共 {total / 1024:.1f} GB")
         pushes["low"] = today
 
+    # state 里只有"还在用"的包（normalize 已把失效的剔除），所以"整包从列表消失"有两种
+    # 可能：真用完了，或到期作废。作废时 remain 往往还大于 0，不能当成"用完"——观测时刻
+    # 必然晚于 expire，会把 Widget 上的「刚失效」永远盖成「已用完」。
+    now_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now))
     before = {p["id"]: p for p in state.get("packages", [])}
+    drained = state.get("drained_last")
     for pid, old in before.items():
         if old["remain_mb"] <= 0:
             continue
         now_remain = next((p["remain_mb"] for p in snap["packages"] if p["id"] == pid), None)
-        if now_remain is None or now_remain <= 0:      # 用完了，或整包从列表消失
-            name = old.get("name") or pid
-            key = f"done:{pid}"
-            if not pushes.get(key):
-                notify(bark_url, "流量包用完了", name)
-                pushes[key] = today
-            # 接口不给"用完时间"，只能记首次观测到归零的快照时间（15 分钟粒度）
-            state["drained_last"] = {"id": pid, "name": name,
-                                     "total_mb": old.get("total_mb"), "at": int(now)}
+        if now_remain is not None and now_remain > 0:
+            continue
+        expire = old.get("expire") or ""
+        if now_remain is None and expire and expire <= now_str:
+            continue                                   # 到期作废，不是用完
+        name = old.get("name") or pid
+        key = f"done:{pid}"
+        if not pushes.get(key):
+            notify(bark_url, "流量包用完了", name)
+            pushes[key] = today
+        # 接口不给"用完时间"，只能记首次观测到归零的快照时间（15 分钟粒度）。同一轮里
+        # 多个包一起归零时观测时刻相同，取到期时间较晚的（离现在更近）。
+        cand = {"id": pid, "name": name, "total_mb": old.get("total_mb"), "expire": expire,
+                "at": int(now)}
+        if not drained or (cand["at"], cand["expire"]) >= (drained["at"], drained.get("expire") or ""):
+            drained = state["drained_last"] = cand
     state["packages"] = snap["packages"]
-    drained = state.get("drained_last")
     if drained and now - drained["at"] < 7 * 86400:
         snap["drained_last"] = drained
 
@@ -419,6 +430,20 @@ def self_test() -> int:
     snapshot_and_push({"total": {"total_mb": 2048.0, "used_mb": 2048.0, "remain_mb": 0.0},
                        "packages": [dict(pkg, remain_mb=0.0)]}, drain, "0000", "", now=1795000900)
     assert drain["drained_last"]["id"] == "X" and drain["drained_last"]["at"] == 1795000900, drain
+
+    dead = {"id": "Y", "name": "周包", "total_mb": 1024.0, "remain_mb": 300.0,
+            "expire": "2026-11-18 20:00:00"}
+    expired = {"fail": 0, "pushes": {}, "daily": [], "packages": [dead]}
+    snapshot_and_push({"total": {"total_mb": 2048.0, "used_mb": 0.0, "remain_mb": 0.0},
+                       "packages": []}, expired, "0000", "", now=1795005000)
+    assert "drained_last" not in expired and not any(k.startswith("done:") for k in expired["pushes"]), \
+        "到期作废不是用完"
+    pair = {"fail": 0, "pushes": {}, "daily": [],
+            "packages": [dict(pkg, id="A", expire="2026-11-19 08:00:00"),
+                         dict(pkg, id="B", expire="2026-11-20 08:00:00")]}
+    snapshot_and_push({"total": {"total_mb": 2048.0, "used_mb": 2048.0, "remain_mb": 0.0},
+                       "packages": []}, pair, "0000", "", now=1795005000)
+    assert pair["drained_last"]["id"] == "B", "同轮多个包归零应留到期更晚的那个"
 
     seq, calls = iter(["410000", "000000"]), []
     saved = (_query, cs.mint_cookie, cs.invalidate_minted, cs.note_session_ok)
