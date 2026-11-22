@@ -100,11 +100,12 @@ function label(stack, text, font, color) {
 }
 
 function header(w, data, ratio, age, size) {
+  const stale = data.ok === false || age > 3600;
   const row = w.addStack();
   row.layoutHorizontally();
   row.centerAlignContent();
   try {
-    const img = row.addImage(ring(size, ratio, data.ok === false ? C.warn : C.ok));
+    const img = row.addImage(ring(size, ratio, stale ? C.warn : C.ok));
     img.imageSize = new Size(size, size);
     row.addSpacer(10);
   } catch (e) {
@@ -116,7 +117,7 @@ function header(w, data, ratio, age, size) {
   label(col, "剩余流量", Font.mediumSystemFont(11), C.dim);
   label(col, fmtMB(data.total.remain_mb), Font.boldSystemFont(FAMILY === "small" ? 22 : 26), C.text);
   label(col, `${Math.round(ratio * 100)}% · ${ago(age)}`,
-        Font.systemFont(10), data.ok === false ? C.warn : C.dim);
+        Font.systemFont(10), stale ? C.warn : C.dim);
 }
 
 function packageRow(w, p, tall) {
@@ -141,7 +142,9 @@ function build(data) {
   header(w, data, ratio, age, FAMILY === "small" ? 50 : FAMILY === "large" ? 66 : 58);
 
   const pkgs = data.packages || [];
-  const live = pkgs.filter((p) => p.remain_mb > 0);
+  // 快照可能是几小时前的（Mac 抓取失败时保留上一份），已过期的包不能再当成"在用"展示
+  const nowMs = Date.now();
+  const live = pkgs.filter((p) => p.remain_mb > 0 && !(p.expire && Date.parse(p.expire.replace(" ", "T")) < nowMs));
   const drained = pkgs.length - live.length;
 
   if (MAX_ROWS) {
@@ -153,7 +156,7 @@ function build(data) {
     }
     w.addSpacer(FAMILY === "large" ? 8 : 6);
     if (!live.length) {
-      label(w, "全部流量包都已用完", Font.mediumSystemFont(12), C.warn);
+      label(w, "没有可用流量包", Font.mediumSystemFont(12), C.warn);
     }
     for (const p of live.slice(0, MAX_ROWS)) {
       packageRow(w, p, FAMILY === "large");
