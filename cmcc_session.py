@@ -18,6 +18,10 @@
   3. 唯一前提是 `Cookie` 头必须存在（缺了报 `950102 x-sign错误`，因为 x-sign
      拿 JSESSIONID 拼串）。值本身无所谓。
   4. 同一号码约 1 分钟内重复 autoLogin 会返回 `233031` 限流；不同号码互不影响。
+     频率再高会升级为行为风控：`214100`（请求疑似存在风险）、`214103`（登录过于
+     频繁，需人脸识别解封）。**autoLogin 就是一次 App 一键登录**，因此本模块把会话
+     落盘复用（`MINT_TTL`）并限制跨进程最短现签间隔（`MINT_MIN_INTERVAL`），命中
+     风控码后还会静默一段时间（`RISK_SILENCE`）。
 
 加密体系（与真实抓包逐字节对齐，见 --self-test）：
 
@@ -53,6 +57,7 @@ import random
 import re
 import ssl
 import sys
+import tempfile
 import time
 import uuid
 from datetime import datetime
@@ -83,14 +88,27 @@ DEAD_CODES = {
     "420000": ("该号码已在其他设备登录，服务端拒绝再签发会话",
                "在该号码当前手机上打开中国移动 App 退出登录后重试；若换过手机，"
                "用当前手机的抓包重新 --har 导入 profile（模板里的设备指纹须与在用手机一致）"),
+    "214100": ("请求疑似存在风险，需完成验证",
+               "完成 App 内人机验证后隔几小时再试；脚本已自动静默，期间不要再手动重跑"),
+    "214103": ("账号近期登录过于频繁（行为风控）",
+               "立刻停掉所有定时任务，在 App 内完成人脸识别解封，至少隔一天再试"),
 }
 
 log = logging.getLogger("cmcc_session")
 
-# 同一进程内复用刚签到的会话：一轮脚本会为多个活动各换一次票，每次都现签会
-# 在一分钟内打出多次 autoLogin，触发 233031 限流乃至风控。有效期取 10 分钟。
+# 会话复用与现签冷却（跨进程）。autoLogin 就是一次「一键登录」：流量 Widget 每 15
+# 分钟刷新一次，若每次都现签，一天就是几十次登录，账号很快被 214100/214103 风控
+# （214103 需人脸识别解封）。故把会话落盘复用，并限制最短现签间隔。
 _MINTED: dict[str, tuple[float, str]] = {}
-_MINT_TTL = 600
+MINT_TTL = 8 * 3600          # 会话复用窗口；Widget 每 15 分钟用一次不会闲置，失效时由调用方清缓存
+MINT_MIN_INTERVAL = 600      # 两次现签的最小间隔（跨进程，防多脚本同时抢签）
+RISK_SILENCE = {             # 命中风控码后的静默时长：继续登录只会把封控窗口拖长
+    "233031": 600,           # 同号短时间多次续期，约 1 分钟窗口
+    "214100": 2 * 3600,      # 请求疑似存在风险，需完成验证
+    "214103": 24 * 3600,     # 登录过于频繁，需人脸识别解封
+}
+# 最近一次自动登录失败信息（供调用方把真实原因拼进报错，避免误导用户去重新抓包）
+LAST_ERROR: dict = {}
 
 
 class LegacyAdapter(HTTPAdapter):
@@ -271,17 +289,108 @@ def update_config_token(config_path: str, phone: str, cookie: str) -> bool:
 
 # ---------------------------------------------------------------- 续期
 
+def mint_state_file(phone: str) -> Path:
+    tail = re.sub(r"\D", "", phone or "")[-4:] or "default"
+    return ROOT / f".cmcc_mint_{tail}.json"
+
+
+def _load_mint(phone: str) -> dict:
+    try:
+        return json.loads(mint_state_file(phone).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_mint(phone: str, **fields) -> dict:
+    st = _load_mint(phone)
+    st.update(fields)
+    try:
+        mint_state_file(phone).write_text(json.dumps(st, ensure_ascii=False), encoding="utf-8")
+    except OSError as e:
+        log.warning("现签状态写入失败: %s", e)
+    return st
+
+
+def reusable_cookie(phone: str, now: float | None = None) -> str | None:
+    """未过复用窗口且未被风控静默的现签会话，供各脚本跨进程共用。"""
+    now = time.time() if now is None else now
+    st = _load_mint(phone)
+    if float(st.get("blocked_until") or 0) > now:
+        return None
+    cookie = str(st.get("cookie") or "")
+    if cookie and 0 <= now - float(st.get("ts") or 0) < MINT_TTL:
+        return cookie
+    return None
+
+
+def mint_blocked_reason(phone: str, now: float | None = None) -> str:
+    """返回不能现签的原因；空串表示可以现签。"""
+    now = time.time() if now is None else now
+    st = _load_mint(phone)
+    until = float(st.get("blocked_until") or 0)
+    if until > now:
+        code = st.get("blocked_code") or ""
+        return f"风控静默中（{code}，{(until - now) / 3600:.1f} 小时后解禁）"
+    if 0 <= now - float(st.get("ts") or 0) < MINT_MIN_INTERVAL:
+        return f"距上次现签不足 {MINT_MIN_INTERVAL // 60} 分钟"
+    return ""
+
+
+def invalidate_minted(phone: str) -> None:
+    """会话被服务端拒绝时清掉缓存；冷却仍在，避免失败后立刻补签。"""
+    _MINTED.pop(phone, None)
+    if _load_mint(phone).get("cookie"):
+        _save_mint(phone, cookie="")
+
+
+def risk_blocked_until(phone: str) -> float:
+    """风控静默截止时间戳（0 表示未被封停）；冷却（MINT_MIN_INTERVAL）不算封停。"""
+    return float(_load_mint(phone).get("blocked_until") or 0)
+
+
+def _record_risk(phone: str, code: str) -> None:
+    silence = RISK_SILENCE.get(code)
+    if not silence:
+        return
+    _MINTED.pop(phone, None)
+    _save_mint(phone, cookie="", ts=time.time(),
+               blocked_until=time.time() + silence, blocked_code=code)
+    log.error("命中风控 %s：%.1f 小时内不再自动登录（继续登录只会延长封控）",
+              code, silence / 3600)
+
+
+def last_error_hint() -> str:
+    code = str(LAST_ERROR.get("retCode") or "")
+    desc = LAST_ERROR.get("retDesc") or ""
+    if code in RISK_SILENCE:
+        return f"autoLogin 被风控（{code} {desc}），已静默"
+    return f"autoLogin 失败：{desc}" if desc else ""
+
+
 def mint_cookie(profile: dict, timeout: int = 25) -> str | None:
-    """现签一张新会话 cookie（同进程内 10 分钟内复用，避免触发限流）。
+    """现签一张新会话 cookie（复用窗口内跨进程共用，避免把账号打成「登录过于频繁」）。
 
     autoLogin 不校验来者的 JSESSIONID，故这里用随机 UUID 占位即可（只需 Cookie
     头存在，供 x-sign 拼串）。签名/加密其余部分必须用抓包还原的模板。
     成功返回 cookie 字符串；失败返回 None（调用方决定是否回退）。
     """
     key = str(profile.get("phone") or "")
+    now = time.time()
     hit = _MINTED.get(key)
-    if hit and time.time() - hit[0] < _MINT_TTL:
+    if hit and now - hit[0] < MINT_TTL:
         return hit[1]
+
+    cached = reusable_cookie(key, now)
+    if cached:
+        _MINTED[key] = (now, cached)
+        return cached
+
+    reason = mint_blocked_reason(key, now)
+    if reason:
+        log.info("跳过现签：%s", reason)
+        LAST_ERROR.clear()
+        LAST_ERROR.update({"retCode": "", "retDesc": reason})
+        return None
 
     url = profile["url"]
     plain = json.dumps(profile["template"], separators=(",", ":"), ensure_ascii=False)
@@ -291,20 +400,29 @@ def mint_cookie(profile: dict, timeout: int = 25) -> str | None:
     s = requests.Session()
     s.trust_env = False  # 不继承系统代理，避免抓包工具 MITM 证书干扰
     s.mount("https://", LegacyAdapter())
+    # 先记时间戳：失败也算一次尝试，冷却期内不会再打登录接口
+    _save_mint(key, ts=time.time())
     try:
         r = s.post(url, data=encrypt_body(plain).encode(), headers=headers, timeout=timeout)
     except requests.RequestException as e:
+        LAST_ERROR.clear()
+        LAST_ERROR.update({"retCode": "", "retDesc": f"网络异常: {e}"})
         log.warning("现签会话网络异常: %s", e)
         return None
 
     resp = decrypt_response(r.content)
     if resp is None or str(resp.get("retCode")) != "000000":
-        log.warning("现签会话失败: %s %s", (resp or {}).get("retCode"),
-                    (resp or {}).get("retDesc") or r.content[:60])
+        code = str((resp or {}).get("retCode") or "")
+        desc = (resp or {}).get("retDesc") or ""
+        LAST_ERROR.clear()
+        LAST_ERROR.update({"retCode": code, "retDesc": desc})
+        log.warning("现签会话失败: %s %s", code, desc or r.content[:60])
+        _record_risk(key, code)
         return None
     cookie = r.headers.get("Set-Cookie")
     if cookie:
         _MINTED[key] = (time.time(), cookie)
+        _save_mint(key, cookie=cookie, ts=time.time(), blocked_until=0, blocked_code="")
     return cookie
 
 
@@ -313,6 +431,11 @@ def refresh(profile: dict, timeout: int = 25, config_path: str = "") -> dict:
 
     返回 {ok, retCode, validityTerm, cookie} 或 {ok:False, reason, retCode, dead}。
     """
+    phone = str(profile.get("phone") or "")
+    reason = mint_blocked_reason(phone)
+    if reason:
+        return {"ok": False, "reason": f"跳过现签：{reason}"}
+
     url = profile["url"]
     # 明文必须与 xs 用同一份字符串，故统一从这里重建
     plain = json.dumps(profile["template"], separators=(",", ":"), ensure_ascii=False)
@@ -326,6 +449,7 @@ def refresh(profile: dict, timeout: int = 25, config_path: str = "") -> dict:
     s = requests.Session()
     s.trust_env = False  # 不继承系统代理，避免抓包工具 MITM 证书干扰
     s.mount("https://", LegacyAdapter())
+    _save_mint(phone, ts=time.time())
     try:
         r = s.post(url, data=encrypt_body(plain).encode(), headers=headers, timeout=timeout)
     except requests.RequestException as e:
@@ -340,6 +464,7 @@ def refresh(profile: dict, timeout: int = 25, config_path: str = "") -> dict:
 
     code = str(resp.get("retCode"))
     if code != "000000":
+        _record_risk(phone, code)
         return {"ok": False, "retCode": code, "retDesc": resp.get("retDesc", ""),
                 "dead": code in DEAD_CODES}
 
@@ -351,6 +476,8 @@ def refresh(profile: dict, timeout: int = 25, config_path: str = "") -> dict:
         profile["validity_term"] = validity
         profile["saved_at"] = time.time()
         save_profile(profile)
+        _MINTED[phone] = (time.time(), new_cookie)
+        _save_mint(phone, cookie=new_cookie, ts=time.time(), blocked_until=0, blocked_code="")
         # 顺带回写 config.json 的 app_token：新会话可直接用于 appTokenLogin
         if config_path and update_config_token(config_path, profile["phone"], new_cookie):
             log.info("已回写 %s 的 app_token", config_path)
@@ -416,8 +543,44 @@ def self_test() -> int:
     got = hashlib.md5(f"{rs_url}_{rs_plain}_{SALT}".encode()).hexdigest()
     assert got == "b52a75aa79e6e506222c6199cc8be97c", got
 
-    print("self-test OK：AES 往返、x-token 布局、x-sign 公式、xs 向量全部通过")
+    _self_test_throttle()
+    print("self-test OK：AES 往返、x-token 布局、x-sign 公式、xs 向量、现签冷却全部通过")
     return 0
+
+
+def _self_test_throttle() -> None:
+    """离线校验会话复用窗口、最短现签间隔与风控静默（不联网）。"""
+    global ROOT
+    old_root, now = ROOT, 1_000_000.0
+    ROOT = Path(tempfile.mkdtemp())
+    try:
+        phone = "13800000000"
+        assert reusable_cookie(phone, now) is None
+        assert mint_blocked_reason(phone, now) == ""
+
+        _save_mint(phone, cookie="JSESSIONID=a", ts=now - 60)
+        assert reusable_cookie(phone, now) == "JSESSIONID=a"
+        assert reusable_cookie(phone, now + MINT_TTL) is None
+        assert mint_blocked_reason(phone, now + MINT_TTL) == ""
+
+        _save_mint(phone, cookie="", ts=now)
+        assert "不足" in mint_blocked_reason(phone, now + 60)
+        assert mint_blocked_reason(phone, now + MINT_MIN_INTERVAL + 1) == ""
+
+        _save_mint(phone, cookie="", ts=now, blocked_until=now + 3600, blocked_code="214103")
+        assert reusable_cookie(phone, now + 60) is None
+        assert "214103" in mint_blocked_reason(phone, now + 60)
+        assert mint_blocked_reason(phone, now + 3600 + MINT_MIN_INTERVAL + 1) == ""
+
+        now_real = time.time()
+        _save_mint(phone, cookie="", ts=now_real, blocked_until=0, blocked_code="")
+        _record_risk(phone, "214100")
+        st = _load_mint(phone)
+        assert st["blocked_code"] == "214100", st
+        assert abs(st["blocked_until"] - (now_real + RISK_SILENCE["214100"])) < 5, st
+        assert mint_blocked_reason(phone, now_real) != ""
+    finally:
+        ROOT = old_root
 
 
 # ---------------------------------------------------------------- CLI

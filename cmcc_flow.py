@@ -50,6 +50,7 @@ BIZ_FIELDS = ("tel", "sv", "nt", "sn", "prov", "t", "imei", "city", "ctid",
               "en", "sp", "reqBody", "cid", "xk", "xc", "ak", "cv", "sb", "st")
 UNIT = {"03": 1.0, "04": 1024.0}          # 03=MB, 04=GB → 统一换算成 MB
 NIGHT_START, NIGHT_END = 0, 7              # 该时段不抓（Widget 显示"过期"即可）
+SESSION_DEAD = ("410000", "210000")        # 只有这些码值得清缓存重签，其他失败重签也没用
 ICLOUD = Path.home() / "Library/Mobile Documents/iCloud~dk~simonbs~Scriptable/Documents"
 
 
@@ -81,7 +82,8 @@ def _cookie_of(set_cookie: str) -> str:
 def fetch(profile: dict, timeout: int = 25) -> dict:
     cookie = cs.mint_cookie(profile)
     if not cookie:
-        raise RuntimeError("现签会话失败（见上方 cmcc_session 日志）")
+        hint = cs.last_error_hint()
+        raise RuntimeError("现签会话失败" + (f"（{hint}）" if hint else "（见上方 cmcc_session 日志）"))
     cookie = _cookie_of(cookie)
     jsid = cs.jsessionid_of(cookie)
 
@@ -114,8 +116,12 @@ def fetch(profile: dict, timeout: int = 25) -> dict:
     if r.status_code != 200:
         raise RuntimeError(f"HTTP {r.status_code}")
     out = _decrypt(r.content, RESP_KEY)
-    if str(out.get("retCode")) != "000000":
-        raise RuntimeError(f"{out.get('retCode')} {out.get('retDesc') or ''}".strip())
+    code = str(out.get("retCode"))
+    if code != "000000":
+        if code in SESSION_DEAD:
+            # 会话被服务端回收/顶号：清掉复用缓存，下次跑重新现签（仍受最短间隔约束）
+            cs.invalidate_minted(str(profile.get("phone") or ""))
+        raise RuntimeError(f"{code} {out.get('retDesc') or ''}".strip())
     return out
 
 
@@ -288,6 +294,10 @@ def run(config_path: str, dry: bool, force: bool) -> int:
         return 3
 
     state = load_state(tail)
+    blocked = cs.risk_blocked_until(tail)
+    if blocked > now:
+        print(f"风控静默中，跳过（至 {time.strftime('%m-%d %H:%M', time.localtime(blocked))}）")
+        return 0
     try:
         snap = normalize(fetch(cs.load_profile(tail)))
         snap["phone_tail"] = tail
