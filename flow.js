@@ -10,6 +10,10 @@ const TAIL = (args.widgetParameter || "9819").trim();
 const FAMILY = config.widgetFamily || "medium";
 const MAX_ROWS = FAMILY === "small" ? 0 : FAMILY === "large" ? 99 : 3;
 const fm = FileManager.iCloud();
+// iCloud 偶发「文件在、读出来 0 字节」（日志里 exists=true raw=0）：本地再留一份上次成功的
+// 快照兜底，宁可显示旧数据（头部「x 分钟前」会标黄）也不挂占位提示。
+const localFm = FileManager.local();
+const CACHE = localFm.joinPath(localFm.documentsDirectory(), `flow_${TAIL}.cache.json`);
 
 // 深浅两套色值：文字/底色用 Color.dynamic 交给系统解析，DrawContext 画的图不参与解析，
 // 所以另留一份按 Device.isDarkMode 取值的纯色表 S。
@@ -145,7 +149,10 @@ function readJSON(path) {
     if (raw) {
       try {
         const d = JSON.parse(raw);
-        if (d && d.total) return { data: d, info };
+        if (d && d.total) {
+          try { localFm.writeString(CACHE, raw); } catch (e) {}
+          return { data: d, info };
+        }
         info.dl += " shape:" + (d && typeof d === "object" ? Object.keys(d).join("/") : String(d)).slice(0, 60);
       } catch (e) {
         info.dl += " parse:" + String(e).slice(0, 80);
@@ -369,6 +376,15 @@ function wallpaperSlice() {
   return fm.readImage(bgPath);
 }
 
+function readCache() {
+  try {
+    const d = JSON.parse(localFm.readString(CACHE) || "");
+    return d && d.total ? d : null;
+  } catch (e) {
+    return null;
+  }
+}
+
 const path = fm.joinPath(fm.documentsDirectory(), `flow_${TAIL}.json`);
 let data = null;
 let info = {};
@@ -377,6 +393,14 @@ try {
 } catch (e) {
   data = { ok: false, error: String(e), updated_at: 0 };
   info = { dl: "throw:" + String(e).slice(0, 100) };
+}
+
+if (!data || !data.total) {
+  const cached = readCache();
+  if (cached) {
+    data = cached;
+    info.dl += " cache";
+  }
 }
 
 if (!data || !data.total) {
