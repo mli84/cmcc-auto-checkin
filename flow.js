@@ -56,9 +56,11 @@ function ago(sec) {
 
 function readJSON(path) {
   const fm = FileManager.iCloud();
-
+  // 未下载的 iCloud 文件 fileExists 可能先返回 false，先尝试下载再判断
+  try {
+    if (!fm.isFileDownloaded(path)) fm.downloadFileFromiCloud(path);
+  } catch (e) {}
   if (!fm.fileExists(path)) return null;
-  if (!fm.isFileDownloaded(path)) fm.downloadFileFromiCloud(path);
   return JSON.parse(fm.readString(path));
 }
 
@@ -196,6 +198,8 @@ function placeholder(text, color) {
   const t = w.addText(text);
   t.font = Font.systemFont(11);
   t.textColor = color;
+  // 占位提示也要请求短刷新，否则一次踩空会一直停在这句话上
+  w.refreshAfterDate = new Date(Date.now() + 5 * 60 * 1000);
   return w;
 }
 
