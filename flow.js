@@ -10,16 +10,19 @@ const TAIL = (args.widgetParameter || "9819").trim();
 const FAMILY = config.widgetFamily || "medium";
 const MAX_ROWS = FAMILY === "small" ? 0 : FAMILY === "large" ? 99 : 3;
 
-const C = {
-  bg: new Color("#101418"),
-  text: new Color("#f2f5f8"),
-  dim: new Color("#8b9bb0"),
-  faint: new Color("#4a5768"),
-  line: new Color("#d5dde7"),
-  track: new Color("#2a3340"),
-  ok: new Color("#4ade80"),
-  warn: new Color("#f87171"),
+// 深浅两套色值：文字/底色用 Color.dynamic 交给系统解析，DrawContext 画的图不参与解析，
+// 所以另留一份按 Device.isDarkMode 取值的纯色表 S。
+const LIGHT = {
+  bg: "#f2f5f8", text: "#101418", dim: "#5a6674", faint: "#8b97a6",
+  line: "#2a3340", track: "#dde4ec", ok: "#16a34a", warn: "#dc2626",
 };
+const DARK = {
+  bg: "#101418", text: "#f2f5f8", dim: "#8b9bb0", faint: "#4a5768",
+  line: "#d5dde7", track: "#2a3340", ok: "#4ade80", warn: "#f87171",
+};
+const S = Device.isDarkMode ? DARK : LIGHT;
+const C = {};
+for (const k in DARK) C[k] = Color.dynamic(new Color(LIGHT[k]), new Color(DARK[k]));
 
 function fmtMB(mb) {
   if (mb == null) return "—";
@@ -53,6 +56,7 @@ function ago(sec) {
 
 function readJSON(path) {
   const fm = FileManager.iCloud();
+
   if (!fm.fileExists(path)) return null;
   if (!fm.isFileDownloaded(path)) fm.downloadFileFromiCloud(path);
   return JSON.parse(fm.readString(path));
@@ -76,14 +80,14 @@ function ring(size, ratio, color) {
   const lw = Math.max(4, Math.round(size / 9));
   const inset = lw / 2 + 1;
   dc.setLineWidth(lw);
-  dc.setStrokeColor(C.track);
+  dc.setStrokeColor(new Color(S.track));
   dc.strokeEllipse(new Rect(inset, inset, size - inset * 2, size - inset * 2));
   const sweep = Math.PI * 2 * Math.min(Math.max(ratio, 0), 1);
   if (sweep > 0.05) {
     const p = new Path();
     p.addLines(arcPoints(size / 2, (size - inset * 2) / 2, sweep, Math.max(10, Math.round(sweep / 0.06))));
     dc.addPath(p);
-    dc.setStrokeColor(color);
+    dc.setStrokeColor(new Color(color));
     dc.setLineWidth(lw);
     dc.strokePath();
   }
@@ -105,7 +109,7 @@ function header(w, data, ratio, age, size) {
   row.layoutHorizontally();
   row.centerAlignContent();
   try {
-    const img = row.addImage(ring(size, ratio, stale ? C.warn : C.ok));
+    const img = row.addImage(ring(size, ratio, stale ? S.warn : S.ok));
     img.imageSize = new Size(size, size);
     row.addSpacer(10);
   } catch (e) {
@@ -133,7 +137,9 @@ function packageRow(w, p, tall) {
 function build(data) {
   const w = new ListWidget();
   w.setPadding(12, 14, 12, 14);
-  w.backgroundColor = C.bg;
+  const bg = wallpaperSlice();
+  if (bg) w.backgroundImage = bg;
+  else w.backgroundColor = C.bg;
   const remain = data.total.remain_mb || 0;
   const total = data.total.total_mb || 0;
   const ratio = total ? remain / total : 0;
@@ -183,7 +189,9 @@ function build(data) {
 
 function placeholder(text, color) {
   const w = new ListWidget();
-  w.backgroundColor = C.bg;
+  const bg = wallpaperSlice();
+  if (bg) w.backgroundImage = bg;
+  else w.backgroundColor = C.bg;
   w.setPadding(12, 14, 12, 14);
   const t = w.addText(text);
   t.font = Font.systemFont(11);
@@ -192,6 +200,16 @@ function placeholder(text, color) {
 }
 
 const fm = FileManager.iCloud();
+
+// flow_bg_<尾号>.jpg 放的是与桌面对应区域的壁纸截图裁片：iOS 不允许小组件真透明，
+// 只有把壁纸裁片当背景图才能"看起来透明"。没有这张图就退回纯色底。
+function wallpaperSlice() {
+  const bgPath = fm.joinPath(fm.documentsDirectory(), `flow_bg_${TAIL}.jpg`);
+  if (!fm.fileExists(bgPath)) return null;
+  if (!fm.isFileDownloaded(bgPath)) fm.downloadFileFromiCloud(bgPath);
+  return fm.readImage(bgPath);
+}
+
 const path = fm.joinPath(fm.documentsDirectory(), `flow_${TAIL}.json`);
 let data = null;
 try {
