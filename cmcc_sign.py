@@ -70,6 +70,10 @@ LOCAL_HOSTNAMES = {
 
 log = logging.getLogger("cmcc_sign")
 
+# 本轮运行登录已判定失败（凭证失效/风控）后不再重试：一轮脚本要为多个活动各换一次
+# 票，若每次都重新登录，等于一分钟内打出十几次失败登录，正是 214100/214103 的诱因。
+_LOGIN_DEAD = ""
+
 
 class LegacyTLSAdapter(HTTPAdapter):
     """wx.10086.cn 前端网关只接受老式 TLS 套件（如 ECDHE-RSA-AES128-SHA），
@@ -264,6 +268,10 @@ def exchange_session(cfg: Config, act_url: str | None = None) -> tuple[requests.
     - 因此优先用缓存 jwt 免票据续期，app_token 仅在 jwt 缺失/失效时作引导兜底；
     - 每次登录响应都会重签 jwt，总是回写缓存保持最新。
     """
+    global _LOGIN_DEAD
+    if _LOGIN_DEAD:
+        raise RuntimeError(f"本轮登录失败过，跳过重复登录：{_LOGIN_DEAD}")
+
     s = requests.Session()
     # 直连：不继承系统/环境变量代理，避免本机抓包工具的 MITM 证书干扰 SSL 验证
     s.trust_env = False
@@ -313,10 +321,21 @@ def exchange_session(cfg: Config, act_url: str | None = None) -> tuple[requests.
             if fresh:
                 log.info("app_token 会话已过期，用 autoLogin 现签新会话重试")
                 resp = _app_token_login(s, login_url, base_body, fresh)
+                if resp.get("code") == "SUCCESS":
+                    cfg.app_token = fresh  # 本轮后续活动直接复用，少打一次失败登录
         if resp.get("code") != "SUCCESS":
+            _LOGIN_DEAD = f"{resp.get('code')} {resp.get('msg')}"
+            hint = ""
+            try:
+                import cmcc_session
+                hint = cmcc_session.last_error_hint()
+            except ImportError:
+                pass
             raise RuntimeError(
                 f"appTokenLogin 失败: {resp.get('code')} {resp.get('msg')} —— "
-                "app_token 失效且自动续期未成功，请重新抓包更新凭证"
+                + (f"{hint}；" if hint else "")
+                + ("等待静默期结束后再试，此时重新抓包无用" if "风控" in hint
+                   else "app_token 失效且自动续期未成功，请重新抓包更新凭证")
             )
 
     data = resp["data"]

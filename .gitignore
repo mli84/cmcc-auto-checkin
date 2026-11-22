@@ -33,6 +33,7 @@ scripts/checkin.sh
 scripts/install-launchd.sh
 .cmcc_ticket_cache*.json
 .cmcc_ticket_meta*.json
+.cmcc_mint_*.json
 
 .omo
 .cmcc_session_*.json
