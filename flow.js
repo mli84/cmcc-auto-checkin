@@ -77,7 +77,10 @@ function recentLine(data) {
   const done = data.drained_last;
   const goneMs = gone ? Date.parse(String(gone.expire || "").replace(" ", "T")) || 0 : 0;
   const doneMs = done && done.at ? done.at * 1000 : 0;
-  if (done && doneMs > goneMs) {
+  // 旧快照可能把"到期作废"记成"用完"（且没写 expire）；包已过期就不再信这条记录。
+  const spent = done && done.expire &&
+                (Date.parse(String(done.expire).replace(" ", "T")) || 0) >= Date.now();
+  if (spent && doneMs > goneMs) {
     return `已用完：${shortName(done.name)} ${fmtMB(done.total_mb)} · ${pastMoment(stampOf(done.at), "用完")}`;
   }
   if (gone) {
