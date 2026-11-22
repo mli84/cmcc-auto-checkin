@@ -30,15 +30,16 @@ function shortName(name) {
   return String(name || "").replace(/\s*[（(]\d{4}\/\d{1,2}\/\d{1,2}.*$/, "").replace(/（已失效）/, "");
 }
 
-function mmdd(dateStr) {
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(dateStr || "");
+function expiry(dateStr) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2}))?/.exec(dateStr || "");
   if (!m) return "";
+  const hm = m[4] ? ` ${m[4]}:${m[5]}` : "";
   const d = new Date(+m[1], +m[2] - 1, +m[3]);
   const today = new Date();
   const diff = Math.round((d - new Date(today.getFullYear(), today.getMonth(), today.getDate())) / 86400000);
-  if (diff === 0) return "今天到期";
-  if (diff === 1) return "明天到期";
-  return `${+m[2]}-${+m[3]} 到期`;
+  if (diff === 0) return `今天${hm} 到期`;
+  if (diff === 1) return `明天${hm} 到期`;
+  return `${+m[2]}-${+m[3]}${hm} 到期`;
 }
 
 function ago(sec) {
@@ -125,7 +126,7 @@ function packageRow(w, p, tall) {
   label(row, shortName(p.name), Font.systemFont(tall ? 12 : 11), C.line);
   row.addSpacer(6);
   label(row, `${fmtMB(p.remain_mb)}/${fmtMB(p.total_mb)}`, Font.mediumSystemFont(tall ? 12 : 11), C.text);
-  label(row, " · " + mmdd(p.expire), Font.systemFont(10), C.faint);
+  label(row, " · " + expiry(p.expire), Font.systemFont(10), C.faint);
 }
 
 function build(data) {
