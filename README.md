@@ -290,6 +290,16 @@ iOS 不允许第三方小组件真透明（`Color.clear()` 会渲染成白底）
 
 推送（Bark）：剩余低于 10% 或 1 GB 每天一条；某个流量包用完推一次；连续失败 3 次推一次，恢复后再推一次。
 
+Widget 端排障：每次刷新都会往 Scriptable 的 iCloud 目录追加一行 `flow_widget_<尾号>.log`
+（`存在/已下载/下载结果/目录里有哪些 flow_*.json/剩余量`），Mac 上直接看
+
+```bash
+tail -20 ~/Library/Mobile\ Documents/iCloud~dk~simonbs~Scriptable/Documents/flow_widget_9819.log
+```
+
+出现 `MISS ... dl=err:` 即 Widget 跑了但下载失败（iCloud 没同步/无网络）；`dir=[flow_9819.json.icloud]`
+说明文件只在云端没落地；日志为空则说明 Widget 根本没刷新过（脚本没选对/被系统限流）。日志只保留最近约 12KB。
+
 接口与加密（2026-11-20 实测，与 [ha-china-mobile](https://github.com/margrop/ha-china-mobile) 的 `BIZ_KEYS` 一致）：
 
 | 项 | 值 |
