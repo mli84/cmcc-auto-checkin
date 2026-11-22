@@ -298,7 +298,8 @@ tail -20 ~/Library/Mobile\ Documents/iCloud~dk~simonbs~Scriptable/Documents/flow
 ```
 
 出现 `MISS ... dl:Error` 即 Widget 跑了但下载失败（iCloud 没同步/无网络）；`dir=[flow_9819.json.icloud]`
-说明文件只在云端没落地；`exists=true raw=0` 是文件在却读不出来（已自动重试一次，仍失败就等下次刷新）；
+说明文件只在云端没落地；`exists=true raw=0` 是文件在却读不出来，此时显示手机上本地缓存的上一份快照
+（`flow_9819.cache.json`，头部的「x 分钟前」标黄），读成功后缓存自动刷新；
 日志为空则说明 Widget 根本没刷新过（脚本没选对/被系统限流）。日志只保留最近约 12KB。
 
 接口与加密（2026-11-20 实测，与 [ha-china-mobile](https://github.com/margrop/ha-china-mobile) 的 `BIZ_KEYS` 一致）：
