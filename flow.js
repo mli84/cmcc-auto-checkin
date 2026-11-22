@@ -9,6 +9,7 @@
 const TAIL = (args.widgetParameter || "9819").trim();
 const FAMILY = config.widgetFamily || "medium";
 const MAX_ROWS = FAMILY === "small" ? 0 : FAMILY === "large" ? 99 : 3;
+const fm = FileManager.iCloud();
 
 // 深浅两套色值：文字/底色用 Color.dynamic 交给系统解析，DrawContext 画的图不参与解析，
 // 所以另留一份按 Device.isDarkMode 取值的纯色表 S。
@@ -54,14 +55,50 @@ function ago(sec) {
   return Math.round(sec / 86400) + " 天前";
 }
 
-function readJSON(path) {
-  const fm = FileManager.iCloud();
-  // 未下载的 iCloud 文件 fileExists 可能先返回 false，先尝试下载再判断
+// Widget 跑在手机上，Mac 看不到它的日志，所以把每次读取结果写进 iCloud 同目录的
+// flow_widget_<尾号>.log，Mac 上直接 tail 就能判断是「文件没同步过来」还是「下载失败」。
+function stamp() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+function logLine(text) {
   try {
-    if (!fm.isFileDownloaded(path)) fm.downloadFileFromiCloud(path);
+    const p = fm.joinPath(fm.documentsDirectory(), `flow_widget_${TAIL}.log`);
+    let old = "";
+    if (fm.fileExists(p)) {
+      if (!fm.isFileDownloaded(p)) fm.downloadFileFromiCloud(p);
+      old = fm.readString(p) || "";
+    }
+    // 只留最近一段，15 分钟一次也不会把 iCloud 撑大
+    if (old.length > 16000) old = old.slice(-12000);
+    fm.writeString(p, `${old}${stamp()} ${FAMILY} ${text}\n`);
   } catch (e) {}
-  if (!fm.fileExists(path)) return null;
-  return JSON.parse(fm.readString(path));
+}
+
+function readJSON(path) {
+  // 未下载的 iCloud 文件 fileExists 可能先返回 false，先尝试下载再判断
+  const info = { exists: false, downloaded: false, dl: "skip" };
+  try {
+    info.exists = fm.fileExists(path);
+    info.downloaded = fm.isFileDownloaded(path);
+    if (!info.downloaded) {
+      fm.downloadFileFromiCloud(path);
+      info.dl = "ok";
+      info.downloaded = fm.isFileDownloaded(path);
+      info.exists = fm.fileExists(path);
+    }
+  } catch (e) {
+    info.dl = "err:" + String(e).slice(0, 100);
+  }
+  if (!fm.fileExists(path)) return { data: null, info };
+  try {
+    return { data: JSON.parse(fm.readString(path)), info };
+  } catch (e) {
+    info.dl = "parse:" + String(e).slice(0, 100);
+    return { data: { ok: false, error: "JSON 解析失败", updated_at: 0 }, info };
+  }
 }
 
 function arcPoints(c, r, sweep, steps) {
@@ -203,8 +240,6 @@ function placeholder(text, color) {
   return w;
 }
 
-const fm = FileManager.iCloud();
-
 // flow_bg_<尾号>.jpg 放的是与桌面对应区域的壁纸截图裁片：iOS 不允许小组件真透明，
 // 只有把壁纸裁片当背景图才能"看起来透明"。没有这张图就退回纯色底。
 function wallpaperSlice() {
@@ -216,18 +251,27 @@ function wallpaperSlice() {
 
 const path = fm.joinPath(fm.documentsDirectory(), `flow_${TAIL}.json`);
 let data = null;
+let info = {};
 try {
-  data = readJSON(path);
+  ({ data, info } = readJSON(path));
 } catch (e) {
   data = { ok: false, error: String(e), updated_at: 0 };
+  info = { dl: "throw:" + String(e).slice(0, 100) };
 }
 
 if (!data || !data.total) {
+  let dir = "";
+  try {
+    dir = fm.listContents(fm.documentsDirectory())
+           .filter((n) => n.startsWith("flow_") && n.includes(".json")).join(",");
+  } catch (e) {}
+  logLine(`MISS exists=${info.exists} downloaded=${info.downloaded} dl=${info.dl} dir=[${dir}]`);
   Script.setWidget(placeholder(
     data ? `还没有数据\n${data.error || ""}\n在 Mac 上先跑 cmcc_flow.py`
          : `还没有 flow_${TAIL}.json\n在 Mac 上先跑一次\npython3 cmcc_flow.py`,
     data ? C.warn : C.dim));
 } else {
+  logLine(`OK remain=${data.total.remain_mb} updated_at=${data.updated_at} uploaded=${info.downloaded} dl=${info.dl}`);
   Script.setWidget(build(data));
 }
 Script.complete();
