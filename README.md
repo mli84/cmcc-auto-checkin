@@ -278,6 +278,12 @@ python3 cmcc_flow.py --install-launchd   # 同步 flow.js + 加载 launchd：每
 2. `--install-launchd` 会顺带把 `flow.js` 拷进 Scriptable 的 iCloud 目录，之后改脚本重跑一次即可同步；
 3. 长按桌面 → 加 Scriptable 小组件 → 选中号或小号 → 长按组件「编辑」→ Script 选 `flow.js`，Parameter 填手机尾号（如 `9819`）。
 
+配色跟随系统深浅模式（`Color.dynamic`），进度环按 `Device.isDarkMode` 取色。想让它「看起来透明、透出壁纸」：
+iOS 不允许第三方小组件真透明（`Color.clear()` 会渲染成白底），只能把桌面截图按小组件所在位置裁成
+`flow_bg_<尾号>.jpg` 放进 Scriptable 的 iCloud 目录（可用 [no-background](https://github.com/supermamon/scriptable-no-background)
+或 [mzeryck 的脚本](https://gist.github.com/mzeryck/3a97ccd1e059b3afa3c6666d27a496c9) 生成）。有这张图就当背景图用，没有则退回纯色底；
+换壁纸或挪动小组件后需重新裁一张。系统强调色 iOS 不向第三方小组件暴露，无法自动跟随。
+
 显示口径：只统计**通用流量**（`flowtype=0`），定向流量不展示；同一 `planID` 的「上月结转」与本月包合并成一条；
 流量包按**到期时间升序**排（快过期的在前）；**已用尽或已过期的包不展示**（不贡献剩余量，大号末尾只报个数）。
 小号=总量+百分比环；中号=总量+前 3 个包（超出显示「还有 N 个」）+ 最近失效的 1 个；大号=总量+近 7 天日均/按此速度可用天数+全部包。
