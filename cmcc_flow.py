@@ -16,7 +16,7 @@ Scriptable 目录；Widget 只读本地文件，凭证与签名全部留在 Mac 
   xs    = md5(url_明文_SALT)
   x-token = base64(AES(xk_path_x-time_x-nonce))，xk 取自 .cmcc_session_<尾号>.json
   会话由 cmcc_session.mint_cookie() 提供：落盘结果跨进程复用 8 小时（MINT_TTL），
-  只有业务接口回 410000 或真机 App 重登顶号时才清缓存重签；无需人工抓包、无需保活
+  只有业务接口回 410000 或真机 App 重登顶号时才清缓存重签（同一轮内立刻重签一次）；无需人工抓包、无需保活
 """
 
 from __future__ import annotations
@@ -81,15 +81,11 @@ def _cookie_of(set_cookie: str) -> str:
     return "; ".join(keep)
 
 
-def fetch(profile: dict, timeout: int = 25) -> dict:
-    cookie = cs.mint_cookie(profile)
-    if not cookie:
-        hint = cs.last_error_hint()
-        raise RuntimeError("现签会话失败" + (f"（{hint}）" if hint else "（见上方 cmcc_session 日志）"))
+def _query(cookie: str, tmpl: dict, timeout: int) -> dict:
+    """用已签好的会话打一次套餐余量接口。"""
     cookie = _cookie_of(cookie)
     jsid = cs.jsessionid_of(cookie)
 
-    tmpl = profile["template"]
     plain = json.dumps(
         {k: ({"cellNum": tmpl["tel"]} if k == "reqBody" else tmpl.get(k, "")) for k in BIZ_FIELDS},
         separators=(",", ":"), ensure_ascii=False,
@@ -117,15 +113,30 @@ def fetch(profile: dict, timeout: int = 25) -> dict:
                headers=headers, timeout=timeout)
     if r.status_code != 200:
         raise RuntimeError(f"HTTP {r.status_code}")
-    out = _decrypt(r.content, RESP_KEY)
-    code = str(out.get("retCode"))
-    if code != "000000":
-        if code in SESSION_DEAD:
-            # 会话被服务端回收/顶号：清掉复用缓存并计数，连续失效达阈值后停止重签
-            cs.invalidate_minted(str(profile.get("phone") or ""))
-        raise RuntimeError(f"{code} {out.get('retDesc') or ''}".strip())
-    cs.note_session_ok(str(profile.get("phone") or ""))
-    return out
+    return _decrypt(r.content, RESP_KEY)
+
+
+def fetch(profile: dict, timeout: int = 25) -> dict:
+    phone = str(profile.get("phone") or "")
+    err = ""
+    # 会话被回收/顶号（410000/210000）时清缓存后同轮重签一次：下一轮要等 15 分钟，
+    # 白等一个刷新周期会让 Widget 一直红着报「请重新登录」。登录次数与旧逻辑相同（只是提前）。
+    for _ in range(2):
+        cookie = cs.mint_cookie(profile)
+        if not cookie:
+            hint = cs.last_error_hint()
+            err = err or "现签会话失败" + (f"（{hint}）" if hint else "（见上方 cmcc_session 日志）")
+            break
+        out = _query(cookie, profile["template"], timeout)
+        code = str(out.get("retCode"))
+        if code == "000000":
+            cs.note_session_ok(phone)
+            return out
+        err = f"{code} {out.get('retDesc') or ''}".strip()
+        if code not in SESSION_DEAD:
+            break
+        cs.invalidate_minted(phone)
+    raise RuntimeError(err)
 
 
 # ------------------------------------------------------------------ 归一化
@@ -373,6 +384,7 @@ def install_launchd(config_path: str) -> int:
 
 
 def self_test() -> int:
+    global _query
     fixture = Path(__file__).resolve().parent / "fixtures/flow_sample.json"
     snap = normalize(json.loads(fixture.read_text()), now=time.mktime((2026, 11, 20, 22, 42, 0, 0, 0, -1)))
     assert snap["ok"] is True
@@ -392,6 +404,18 @@ def self_test() -> int:
                            "packages": []}, state, "0000", "", now=1795000000 + i * day)
     assert [d.get("used_mb") for d in state["daily"]] == [None, 500.0, 300.0], state["daily"]
     assert snap and state["daily"][-1]["cum_mb"] == 1800.0
+
+    seq, calls = iter(["410000", "000000"]), []
+    saved = (_query, cs.mint_cookie, cs.invalidate_minted, cs.note_session_ok)
+    try:
+        cs.mint_cookie = lambda profile: "JSESSIONID=x"
+        cs.invalidate_minted = lambda phone: calls.append("invalidate")
+        cs.note_session_ok = lambda phone: None
+        _query = lambda cookie, tmpl, timeout: {"retCode": next(seq), "retDesc": "会话空闲超时"}
+        assert fetch({"phone": "13800000000", "template": {}})["retCode"] == "000000"
+        assert calls == ["invalidate"], calls
+    finally:
+        _query, cs.mint_cookie, cs.invalidate_minted, cs.note_session_ok = saved
     print("self-test OK", json.dumps(snap["total"], ensure_ascii=False))
     return 0
 

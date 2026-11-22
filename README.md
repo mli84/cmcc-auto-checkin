@@ -269,7 +269,7 @@ python3 cmcc_flow.py --install-launchd   # 同步 flow.js + 加载 launchd：每
 ```
 
 数据流：`cmcc_flow.py` 复用 `cmcc_session` 落盘的会话（8 小时窗口，**不需要再抓包**；只有接口回
-`410000` 或真机 App 重新登录把会话顶掉时才清缓存重签）→ 调
+`410000` 或真机 App 重新登录把会话顶掉时才清缓存重签，且在**同一轮里立刻重签一次**，Widget 不会白等一个刷新周期）→ 调
 `clientaccess.10086.cn` 的套餐余量接口 → 归一化成 `~/Library/Mobile Documents/iCloud~dk~simonbs~Scriptable/Documents/flow_<尾号>.json`。
 
 装 Widget（一次性）：
