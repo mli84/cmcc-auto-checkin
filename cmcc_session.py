@@ -93,6 +93,9 @@ DEAD_CODES = {
                "完成 App 内人机验证后隔几小时再试；脚本已自动静默，期间不要再手动重跑"),
     "214103": ("账号近期登录过于频繁（行为风控）",
                "立刻停掉所有定时任务，在 App 内完成人脸识别解封，至少隔一天再试"),
+    # 号码的一键登录凭证过期（通常发生在 App 退出登录/解封后）：重试无用，须在 App 里重新登录一次
+    "213245": ("该手机号码的一键登录已过期",
+               "在 App 内重新登录一次，然后清掉本地静默再运行"),
 }
 
 log = logging.getLogger("cmcc_session")
@@ -107,6 +110,7 @@ RISK_SILENCE = {             # 命中风控码后的静默时长：继续登录�
     "233031": 600,           # 同号短时间多次续期，约 1 分钟窗口
     "214100": 2 * 3600,      # 请求疑似存在风险，需完成验证
     "214103": 24 * 3600,     # 登录过于频繁，需人脸识别解封
+    "213245": 2 * 3600,      # 一键登录凭证过期，重试无用；App 重新登录后可手动清静默
 }
 DEAD_BACKOFF_AFTER = 3       # 业务侧连续这么多次判定会话失效后停止重签
 DEAD_BACKOFF = 6 * 3600      # 退避时长：每次重签都是一次登录，持续重试只会拖长封控
@@ -399,7 +403,7 @@ def _record_risk(phone: str, code: str) -> None:
     _MINTED.pop(phone, None)
     _save_mint(phone, cookie="", ts=time.time(),
                blocked_until=time.time() + silence, blocked_code=code)
-    log.error("命中风控 %s：%.1f 小时内不再自动登录（继续登录只会延长封控）",
+    log.error("命中 %s：%.1f 小时内不再自动登录（继续重试只会延长封控）",
               code, silence / 3600)
 
 
@@ -407,7 +411,7 @@ def last_error_hint() -> str:
     code = str(LAST_ERROR.get("retCode") or "")
     desc = LAST_ERROR.get("retDesc") or ""
     if code in RISK_SILENCE:
-        return f"autoLogin 被风控（{code} {desc}），已静默"
+        return f"autoLogin 失败（{code} {desc}），已暂停重试"
     return f"autoLogin 失败：{desc}" if desc else ""
 
 
