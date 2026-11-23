@@ -2,7 +2,7 @@
 // 数据来自 Mac 上 launchd 每 15 分钟生成的 iCloud 文件，Widget 不联网、不碰凭证。
 // 用法：新建 Scriptable 小组件 → 选本脚本 → 参数填手机尾号（不填默认 9819）。
 //   小号 剩余总量 + 百分比环
-//   中号 总量进度环 + 右侧彩色分段环（各包剩余量占比，圆心为整体可用比例）+ 前 3 个套餐（圆点与环同色）+ 最近失效/用完的 1 个
+//   中号 总量进度环（弧长=整体可用比例，圆心写同一比例）+ 右侧彩色分段环（各包剩余量占比）+ 前 3 个套餐（圆点与环同色）+ 最近失效/用完的 1 个
 //   大号 总量 + 日均/可用天数 + 全部套餐（各自剩余/总量与有效期）
 // 已用尽的包不展示（它只是没到期，不贡献剩余量），大号末尾提示还有几个。
 
@@ -173,7 +173,8 @@ function arcPoints(c, r, start, sweep, steps) {
 }
 
 // Path 没有 addArc：整圈用 strokeEllipse，进度弧用 addLines 折线近似。
-function ring(size, ratio, color) {
+// showPct=true（仅中号）时把同一个比例写进圆心，弧长与数字同源，不会各算各的。
+function ring(size, ratio, color, showPct) {
   const dc = new DrawContext();
   dc.size = new Size(size, size);
   dc.opaque = false;
@@ -192,11 +193,21 @@ function ring(size, ratio, color) {
     dc.setLineWidth(lw);
     dc.strokePath();
   }
+  if (showPct) {
+    const c = size / 2;
+    dc.setTextAlignedCenter();
+    dc.setTextColor(new Color(S.text));
+    dc.setFont(Font.boldSystemFont(13));
+    dc.drawTextInRect(`${Math.round(Math.min(Math.max(ratio, 0), 1) * 100)}%`, new Rect(0, c - 17, size, 16));
+    dc.setTextColor(new Color(S.dim));
+    dc.setFont(Font.systemFont(8));
+    dc.drawTextInRect("可用", new Rect(0, c + 1, size, 10));
+  }
   return dc.getImage();
 }
 
-// 中号：按各包剩余量占比把整圈切成彩色扇段，圆心写整体可用比例。
-function segmentRing(size, segs, pct) {
+// 中号：按各包剩余量占比把整圈切成彩色扇段（纯分布，不再写中心比例，比例已在中号左环圆心）。
+function segmentRing(size, segs) {
   const dc = new DrawContext();
   dc.size = new Size(size, size);
   dc.opaque = false;
@@ -226,13 +237,6 @@ function segmentRing(size, segs, pct) {
     }
     start += full;
   }
-  dc.setTextAlignedCenter();
-  dc.setTextColor(new Color(S.text));
-  dc.setFont(Font.boldSystemFont(13));
-  dc.drawTextInRect(pct, new Rect(0, c - 17, size, 16));
-  dc.setTextColor(new Color(S.dim));
-  dc.setFont(Font.systemFont(8));
-  dc.drawTextInRect("可用", new Rect(0, c + 1, size, 10));
   return dc.getImage();
 }
 
@@ -251,11 +255,11 @@ function header(w, data, ratio, age, size, segs) {
   row.layoutHorizontally();
   row.centerAlignContent();
   try {
-    const img = row.addImage(ring(size, ratio, stale ? S.warn : S.ok));
+    const img = row.addImage(ring(size, ratio, stale ? S.warn : S.ok, !!segs));
     img.imageSize = new Size(size, size);
     row.addSpacer(10);
     if (segs) {
-      const simg = row.addImage(segmentRing(size, segs, `${Math.round(ratio * 100)}%`));
+      const simg = row.addImage(segmentRing(size, segs));
       simg.imageSize = new Size(size, size);
       row.addSpacer(10);
     }
