@@ -115,26 +115,23 @@ function logLine(text) {
     }
     // 只留最近一段，15 分钟一次也不会把 iCloud 撑大
     if (old.length > 16000) old = old.slice(-12000);
-    fm.writeString(p, `${old}${stampOf(Date.now() / 1000, true)} ${FAMILY} ${text}\n`);
+    fm.writeString(p, `${old}${stampOf(Date.now() / 1000, true)} ${FAMILY} v2 ${text}\n`);
   } catch (e) {}
 }
 
-// Scriptable 没有 Script.sleep；用忙等让 iCloud 下载落地后再读一次。
-function wait(ms) {
-  const end = Date.now() + ms;
-  while (Date.now() < end) {}
-}
-
-function readJSON(path) {
+// downloadFileFromiCloud 是异步的（返回 Promise）。以前用忙等「等」下载落地，JS 线程
+// 被占住，Promise 永远没机会 resolve，文件就一直读不出来——日志里 raw=0 能卡几个小时，
+// Widget 只能吃本地缓存。必须 await，让下载真的完成。
+async function readJSON(path) {
   const info = { exists: false, downloaded: false, dl: "skip", raw: 0, tries: 0 };
-  for (let attempt = 1; attempt <= 2; attempt++) {
+  for (let attempt = 1; attempt <= 3; attempt++) {
     info.tries = attempt;
     info.exists = fm.fileExists(path);
     info.downloaded = info.exists && fm.isFileDownloaded(path);
     try {
       // isFileDownloaded 会在文件没落地时也报 true，此时 readString 静默返回 null，
       // JSON.parse(null) === null 会被误判成「文件不存在」；所以每次读之前都强制下载一次
-      fm.downloadFileFromiCloud(path);
+      await fm.downloadFileFromiCloud(path);
       info.dl = "ok";
     } catch (e) {
       info.dl = "dl:" + String(e).slice(0, 80);
@@ -158,7 +155,6 @@ function readJSON(path) {
         info.dl += " parse:" + String(e).slice(0, 80);
       }
     }
-    if (attempt === 1) wait(1000);
   }
   return { data: null, info };
 }
@@ -393,7 +389,7 @@ const path = fm.joinPath(fm.documentsDirectory(), `flow_${TAIL}.json`);
 let data = null;
 let info = {};
 try {
-  ({ data, info } = readJSON(path));
+  ({ data, info } = await readJSON(path));
 } catch (e) {
   data = { ok: false, error: String(e), updated_at: 0 };
   info = { dl: "throw:" + String(e).slice(0, 100) };
