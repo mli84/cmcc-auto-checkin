@@ -146,22 +146,8 @@ def _mb(value, unit) -> float:
         return 0.0
 
 
-def _merge(plans: dict, plan: dict) -> None:
-    """同 planID 合并（"上月结转"和本月是两条）。有效期取最早，名字取不带结转标记的。"""
-    cur = plans.get(plan["id"])
-    if not cur:
-        plans[plan["id"]] = plan
-        return
-    for k in ("total_mb", "used_mb", "remain_mb"):
-        cur[k] += plan[k]
-    if plan["expire"] and (not cur["expire"] or plan["expire"] < cur["expire"]):
-        cur["expire"] = plan["expire"]
-    if "结转" in cur["name"] and "结转" not in plan["name"]:
-        cur["name"] = plan["name"]
-
-
 def _entries(out: dict) -> list[dict]:
-    """接口 → 原始套餐条目（未合并、未过滤）。定向流量（flowtype=1）不要。"""
+    """接口 → 原始套餐条目（未过滤）。定向流量（flowtype=1）不要。"""
     res = (out.get("rspBody") or {}).get("newPlanRemainQryRes") or {}
     rows = []
     for group in ((res.get("planRemianFlowListRes") or {}).get("planRemianFlowRes") or []):
@@ -172,7 +158,10 @@ def _entries(out: dict) -> list[dict]:
             if not flows:
                 continue
             rows.append({
-                "id": p.get("planID") or p.get("planName") or "",
+                # 一次发放一行：日包每次发奖都复用同一个 planID（"统一营销流量日包-100MB"
+                # 领 4 次就是 4 条），必须带上 validDate 才能和 state 里的一一对应。
+                "id": "|".join(x for x in (p.get("planID"), p.get("validDate")) if x)
+                      or p.get("planName") or "",
                 "name": (p.get("planName") or "").strip(),
                 "expire": (p.get("expireDate") or "").strip(),
                 # expireFlag=1 是服务端标的"已失效"，日包过期后也要按时间判
@@ -190,16 +179,10 @@ def normalize(out: dict, now: float | None = None) -> dict:
     flist = res.get("planRemianFlowListRes") or {}
     now_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now))
     rows = _entries(out)
-    # 先按失效与否分开，再在各自的池子里按 planID 合并。日包的 planID 会被不同批次复用，
-    # 先合并会把"本月有效"和"上周已失效"混成一条，所以顺序不能反。
     gone = [r for r in rows if r["expired"] or (r["expire"] and r["expire"] < now_str)]
     dead_ids = {id(r) for r in gone}
-    alive: dict[str, dict] = {}
-    for row in rows:
-        if id(row) not in dead_ids:
-            _merge(alive, row)
+    live = [r for r in rows if id(r) not in dead_ids]
     last_gone = max(gone, key=lambda p: p["expire"]) if gone else None
-    live = alive.values()
     return {
         "updated_at": int(now),
         "ok": True,
@@ -406,13 +389,28 @@ def self_test() -> int:
     assert snap["ok"] is True
     assert 3900 < snap["total"]["remain_mb"] < 4100, snap["total"]["remain_mb"]
     assert abs(snap["total"]["remain_mb"] - snap["total"]["server_remain_mb"]) < 10, "我方累加与接口聚合值不符"
-    assert len(snap["packages"]) == 7, [p["name"] for p in snap["packages"]]      # 同 planID 已合并
+    assert len(snap["packages"]) == 8, [p["name"] for p in snap["packages"]]   # 一轮发放一行
     assert snap["packages"][0]["expire"] == "2026-11-21 08:06:42", "应按到期时间升序"
-    merged = next(p for p in snap["packages"] if p["id"] == "G245489C")
-    assert merged["total_mb"] == 22147 and "结转" not in merged["name"], merged
+    rollover = [p for p in snap["packages"] if p["id"].startswith("G245489C")]
+    assert len(rollover) == 2 and sum(p["total_mb"] for p in rollover) == 22147, rollover
     assert all(p["expire"] for p in snap["packages"]), "每个包都必须有有效期"
     assert snap["expired_last"] and snap["expired_last"]["expire"].startswith("2026-11-20")
     assert all("云盘" not in p["name"] for p in snap["packages"]), "定向流量不该出现"
+
+    # 日包 planID 每次发奖都复用：同 planID、不同 validDate 必须是两行（曾经合并成 /400MB）
+    def grant(valid, total, used):
+        return {"flowtype": 0, "planRemianFlowInfoRes": [{
+            "planID": "G305641", "planName": "统一营销流量日包-100MB",
+            "validDate": f"2026-11-23 {valid}:00", "expireDate": f"2026-11-24 {valid}:00",
+            "expireFlag": 0,
+            "flowInfoRes": [{"totalRes": total, "usedRes": used, "remainRes": total - used, "unit": "03"}],
+        }]}
+    twice = {"rspBody": {"newPlanRemainQryRes": {"planRemianFlowListRes": {"planRemianFlowRes": [
+        grant("14:18:42", 100, 100), grant("19:15:27", 100, 66)]}}}}
+    two = normalize(twice, now=time.mktime((2026, 11, 24, 7, 0, 0, 0, 0, -1)))
+    assert len(two["packages"]) == 2, two["packages"]
+    assert [p["total_mb"] for p in two["packages"]] == [100.0, 100.0], two["packages"]
+    assert two["total"]["remain_mb"] == 34.0, two["total"]
 
     day, state = 86400, {"fail": 0, "pushes": {}, "daily": []}
     for i, cum in enumerate((1000.0, 1500.0, 1800.0)):
