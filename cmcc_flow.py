@@ -25,7 +25,6 @@ import argparse
 import base64
 import hashlib
 import json
-import os
 import random
 import re
 import shutil
@@ -248,11 +247,11 @@ def notify(bark_url: str, title: str, body: str) -> None:
 
 
 def write_json(path: Path, data: dict) -> None:
-    """先写临时文件再 rename：Widget 永远不会读到半截 JSON。"""
+    """原地覆盖，不写临时文件再 rename：rename 换成新 inode 后 iCloud 上传会卡住，
+    手机端一直下载到旧版本或读成 0 字节（Widget 的 raw=0 就是这么来的）。
+    读到半截 JSON 的窗口由 Widget 端重试 + 本地缓存兜底。"""
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1))
-    os.replace(tmp, path)
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=1))
 
 
 def snapshot_and_push(snap: dict, state: dict, tail: str, bark_url: str, now: float) -> None:
