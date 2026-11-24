@@ -147,6 +147,27 @@ def _mb(value, unit) -> float:
         return 0.0
 
 
+def _deduct_expire(expire: str, now: float) -> str:
+    """扣减顺序里的到期日。
+
+    主资费套餐（"全家享99元套餐20GB流量"这类）的 expireDate 是**合同**到期，
+    接口给到几年后，可它每个月清零、按月续发。直接拿合同日期排序，会把这个
+    每月还在扣的主套餐永远压到「加购包」后面，与真实扣减相反（先套餐内流量、
+    再加购包）。跨一个账单周期以上的，一律按本月月末算，让月额度和月包同档。
+    """
+    if not expire:
+        return "9999"
+    try:
+        exp = time.mktime(time.strptime(expire, "%Y-%m-%d %H:%M:%S"))
+    except ValueError:
+        return expire
+    if exp - now <= 366 * 86400:
+        return expire
+    lt = time.localtime(now)
+    nxt = time.mktime((lt.tm_year + lt.tm_mon // 12, lt.tm_mon % 12 + 1, 1, 0, 0, 0, 0, 0, -1))
+    return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(nxt - 1))
+
+
 def _entries(out: dict) -> list[dict]:
     """接口 → 原始套餐条目（未过滤）。定向流量（flowtype=1）不要。"""
     res = (out.get("rspBody") or {}).get("newPlanRemainQryRes") or {}
@@ -164,6 +185,7 @@ def _entries(out: dict) -> list[dict]:
                 "id": "|".join(x for x in (p.get("planID"), p.get("validDate")) if x)
                       or p.get("planName") or "",
                 "name": (p.get("planName") or "").strip(),
+                "valid": (p.get("validDate") or "").strip(),
                 "expire": (p.get("expireDate") or "").strip(),
                 # expireFlag=1 是服务端标的"已失效"，日包过期后也要按时间判
                 "expired": str(p.get("expireFlag")) == "1",
@@ -197,7 +219,13 @@ def normalize(out: dict, now: float | None = None) -> dict:
         "packages": [
             {k: (round(p[k], 1) if k.endswith("_mb") else p[k]) for k in
              ("id", "name", "total_mb", "used_mb", "remain_mb", "expire")}
-            for p in sorted(live, key=lambda p: (p["expire"] or "9999", -p["remain_mb"]))
+            # 先到期先用 → 同到期先扣上月结转 → 先生效先用（移动公示的扣减顺序）
+            for p in sorted(live, key=lambda p: (
+                _deduct_expire(p["expire"], now),
+                0 if "结转" in p["name"] else 1,
+                p["valid"],
+                -p["remain_mb"],
+            ))
         ],
         "expired_last": ({k: (round(last_gone[k], 1) if k.endswith("_mb") else last_gone[k]) for k in
                           ("id", "name", "total_mb", "used_mb", "remain_mb", "expire")} if last_gone else None),
@@ -416,12 +444,35 @@ def self_test() -> int:
     assert 3900 < snap["total"]["remain_mb"] < 4100, snap["total"]["remain_mb"]
     assert abs(snap["total"]["remain_mb"] - snap["total"]["server_remain_mb"]) < 10, "我方累加与接口聚合值不符"
     assert len(snap["packages"]) == 8, [p["name"] for p in snap["packages"]]   # 一轮发放一行
-    assert snap["packages"][0]["expire"] == "2026-11-21 08:06:42", "应按到期时间升序"
+    assert snap["packages"][0]["expire"] == "2026-11-21 08:06:42", "应按扣缴顺序"
     rollover = [p for p in snap["packages"] if p["id"].startswith("G245489C")]
     assert len(rollover) == 2 and sum(p["total_mb"] for p in rollover) == 22147, rollover
     assert all(p["expire"] for p in snap["packages"]), "每个包都必须有有效期"
     assert snap["expired_last"] and snap["expired_last"]["expire"].startswith("2026-11-20")
     assert all("云盘" not in p["name"] for p in snap["packages"]), "定向流量不该出现"
+    # 扣缴顺序：主套餐的合同到期日折算成本月末，排在 12-01 到期的加购包之前
+    assert [p["name"] for p in snap["packages"]][2:] == [
+        "5元5G7天包(20261118-20261125)",
+        "全家享99元套餐(2023版)20GB流量(可共享)（上月结转）",
+        "全家享99元套餐(2023版)20GB流量(可共享)",
+        "10086流量关怀享3GB1个月(线上)",
+        "统一营销流量月包-1GB",
+        "统一营销流量月包-3GB",
+    ], [p["name"] for p in snap["packages"]]
+
+    # 主套餐是月额度、合同却到 2029：必须排在同月到期的加购包之前
+    def row(pid, name, valid, expire):
+        return {"planID": pid, "planName": name, "validDate": valid, "expireDate": expire,
+                "expireFlag": 0,
+                "flowInfoRes": [{"totalRes": "3072", "usedRes": "0", "remainRes": "3072", "unit": "03"}]}
+    long_term = {"rspBody": {"newPlanRemainQryRes": {"planRemianFlowListRes": {"planRemianFlowRes": [
+        {"flowtype": 0, "planRemianFlowInfoRes": [
+            row("B", "全家享99元套餐20GB流量(可共享)", "2026-09-01 00:00:00", "2029-09-01 00:00:00"),
+            row("A", "统一营销流量月包-3GB", "2026-11-16 21:20:43", "2026-12-01 00:00:00"),
+        ]}]}}}}
+    order = [p["name"] for p in normalize(
+        long_term, now=time.mktime((2026, 11, 20, 22, 42, 0, 0, 0, -1)))["packages"]]
+    assert order == ["全家享99元套餐20GB流量(可共享)", "统一营销流量月包-3GB"], order
 
     # 日包 planID 每次发奖都复用：同 planID、不同 validDate 必须是两行（曾经合并成 /400MB）
     def grant(valid, total, used):
