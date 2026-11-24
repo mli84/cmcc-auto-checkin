@@ -115,7 +115,7 @@ function logLine(text) {
     }
     // 只留最近一段，15 分钟一次也不会把 iCloud 撑大
     if (old.length > 16000) old = old.slice(-12000);
-    fm.writeString(p, `${old}${stampOf(Date.now() / 1000, true)} ${FAMILY} v2 ${text}\n`);
+    fm.writeString(p, `${old}${stampOf(Date.now() / 1000, true)} ${FAMILY} v3 ${text}\n`);
   } catch (e) {}
 }
 
@@ -385,11 +385,36 @@ function readCache() {
   }
 }
 
-const path = fm.joinPath(fm.documentsDirectory(), `flow_${TAIL}.json`);
+// Mac 每轮把快照写成新文件名（flow_<尾号>_<epoch>.json）。同一个文件反复原地覆盖时，
+// 手机上的 iCloud 本地副本会卡在 0 字节、download 变成空操作（日志 raw=0），换新文件才会重新下载。
+// 固定名 flow_<尾号>.json 仍作为兜底，兼容手机上还没更新的 flow.js。
+function snapshotPaths() {
+  const dir = fm.documentsDirectory();
+  const prefix = `flow_${TAIL}_`;
+  let names = [];
+  try {
+    names = fm.listContents(dir);
+  } catch (e) {}
+  const newest = names
+    .map((n) => String(n).replace(/\.icloud$/, ""))
+    .filter((n) => n.startsWith(prefix) && n.endsWith(".json") &&
+                   /^\d+$/.test(n.slice(prefix.length, -5)))
+    .sort()
+    .reverse()
+    .slice(0, 2)
+    .map((n) => fm.joinPath(dir, n));
+  newest.push(fm.joinPath(dir, `flow_${TAIL}.json`));
+  return newest;
+}
+
 let data = null;
 let info = {};
 try {
-  ({ data, info } = await readJSON(path));
+  for (const p of snapshotPaths()) {
+    ({ data, info } = await readJSON(p));
+    info.src = p.slice(p.lastIndexOf("/") + 1);
+    if (data && data.total) break;
+  }
 } catch (e) {
   data = { ok: false, error: String(e), updated_at: 0 };
   info = { dl: "throw:" + String(e).slice(0, 100) };
@@ -399,6 +424,7 @@ if (!data || !data.total) {
   const cached = readCache();
   if (cached) {
     data = cached;
+    info.src = "cache";
     info.dl += " cache";
   }
 }
@@ -409,14 +435,14 @@ if (!data || !data.total) {
     dir = fm.listContents(fm.documentsDirectory())
            .filter((n) => n.startsWith("flow_") && n.includes(".json")).join(",");
   } catch (e) {}
-  logLine(`MISS exists=${info.exists} downloaded=${info.downloaded} raw=${info.raw} tries=${info.tries} dl=${info.dl} dir=[${dir}]`);
+  logLine(`MISS src=${info.src || "-"} exists=${info.exists} downloaded=${info.downloaded} raw=${info.raw} tries=${info.tries} dl=${info.dl} dir=[${dir}]`);
   Script.setWidget(placeholder(
     data ? `还没有数据\n${data.error || ""}\n在 Mac 上先跑 cmcc_flow.py`
       : info.exists ? "iCloud 文件还没同步下来\n稍后自动重试"
       : `还没有 flow_${TAIL}.json\n在 Mac 上先跑一次\npython3 cmcc_flow.py`,
     data ? C.warn : C.dim));
 } else {
-  logLine(`OK remain=${data.total.remain_mb} updated_at=${data.updated_at} raw=${info.raw} tries=${info.tries} dl=${info.dl}`);
+  logLine(`OK remain=${data.total.remain_mb} updated_at=${data.updated_at} src=${info.src || "-"} raw=${info.raw} tries=${info.tries} dl=${info.dl}`);
   Script.setWidget(build(data));
 }
 Script.complete();

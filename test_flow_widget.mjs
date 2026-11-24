@@ -62,7 +62,29 @@ const stale = JSON.stringify({
 // Remote-only file: download lands a few ms later. Only an awaited download can read it.
 let log = await runWidget({ "/iCloud/flow_9819.json": null }, { freshRaw: fresh });
 assert.match(log, /OK remain=1234 .*raw=\d+ tries=1/, "must render fresh data read after awaited download");
-assert.match(log, /v2/, "log carries script version so the phone's copy is identifiable");
+assert.match(log, /v3/, "log carries script version so the phone's copy is identifiable");
+
+// Mac-side rotation: the canonical file is a wedged 0-byte copy on the phone, but a newer
+// timestamped snapshot is readable. The widget must render the newest snapshot, not the stale one.
+const newer = JSON.stringify({
+  updated_at: Math.floor(Date.now() / 1000),
+  ok: true,
+  total: { total_mb: 2000, used_mb: 766, remain_mb: 4321 },
+  packages: [{ id: "g", name: "包", total_mb: 2000, used_mb: 766, remain_mb: 4321, expire: "2099-01-01 00:00:00" }],
+});
+log = await runWidget({
+  "/iCloud/flow_9819.json": "",
+  "/iCloud/flow_9819_1795485630123.json": newer,
+  "/iCloud/flow_9819_1795484690123.json": stale,
+});
+assert.match(log, /OK remain=4321 .*src=flow_9819_1795485630123\.json/, "newest timestamped snapshot wins");
+
+// Newest snapshot unreadable (still downloading): fall back to the next one, not the canonical.
+log = await runWidget({
+  "/iCloud/flow_9819_1795485630123.json": "",
+  "/iCloud/flow_9819_1795484690123.json": fresh,
+});
+assert.match(log, /OK remain=1234 .*src=flow_9819_1795484690123\.json/, "falls back to the next snapshot");
 
 // Download never yields content: fall back to the local cache instead of a placeholder.
 log = await runWidget(

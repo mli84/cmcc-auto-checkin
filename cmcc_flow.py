@@ -30,6 +30,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 from urllib.parse import quote
@@ -237,6 +238,26 @@ def write_json(path: Path, data: dict) -> None:
     path.write_text(json.dumps(data, ensure_ascii=False, indent=1))
 
 
+# Mac 侧 bird 每轮都上传成功（日志里 :00/:15/:30/:45 各一次），但手机上的 iCloud 本地
+# 副本会卡在 0 字节且 downloadFileFromiCloud 变成空操作，同一个文件名永远读不出新内容。
+# 每轮换一个新文件名，手机才会把它当新文件重新下载。旧固定名继续写，兼容手机上还没更新的 flow.js。
+SNAPSHOT_KEEP = 24 * 3600
+
+
+def snapshot_path(tail: str, now: float) -> Path:
+    return ICLOUD / f"flow_{tail}_{int(now * 1000)}.json"
+
+
+def prune_snapshots(tail: str, now: float) -> None:
+    cutoff = int(now * 1000) - SNAPSHOT_KEEP * 1000
+    for p in ICLOUD.glob(f"flow_{tail}_*.json"):
+        try:
+            if int(p.stem.rsplit("_", 1)[1]) < cutoff:
+                p.unlink()
+        except (IndexError, ValueError, OSError):
+            continue
+
+
 def snapshot_and_push(snap: dict, state: dict, tail: str, bark_url: str, now: float) -> None:
     today = time.strftime("%Y-%m-%d", time.localtime(now))
     # 接口给的是"本月累计已用"，会跨月归零，所以每天的增量必须用 cum_mb 相减得出，
@@ -327,7 +348,9 @@ def run(config_path: str, dry: bool, force: bool) -> int:
         if state["fail"] == 3:
             notify(bark, "流量刷新连续失败", str(e))
         if not dry:
+            write_json(snapshot_path(tail, now), prev)
             write_json(ICLOUD / f"flow_{tail}.json", prev)
+            prune_snapshots(tail, now)
             save_state(tail, state)
         return 1
 
@@ -340,9 +363,12 @@ def run(config_path: str, dry: bool, force: bool) -> int:
     if dry:
         print(json.dumps(snap, ensure_ascii=False, indent=1))
         return 0
+    snap_path = snapshot_path(tail, now)
+    write_json(snap_path, snap)
     write_json(ICLOUD / f"flow_{tail}.json", snap)
+    prune_snapshots(tail, now)
     save_state(tail, state)
-    print(f"OK 剩余 {snap['total']['remain_mb']:.0f} MB / {len(snap['packages'])} 个包 → {ICLOUD / f'flow_{tail}.json'}")
+    print(f"OK 剩余 {snap['total']['remain_mb']:.0f} MB / {len(snap['packages'])} 个包 → {snap_path}")
     return 0
 
 
@@ -383,7 +409,7 @@ def install_launchd(config_path: str) -> int:
 
 
 def self_test() -> int:
-    global _query
+    global _query, ICLOUD
     fixture = Path(__file__).resolve().parent / "fixtures/flow_sample.json"
     snap = normalize(json.loads(fixture.read_text()), now=time.mktime((2026, 11, 20, 22, 42, 0, 0, 0, -1)))
     assert snap["ok"] is True
@@ -441,6 +467,18 @@ def self_test() -> int:
     snapshot_and_push({"total": {"total_mb": 2048.0, "used_mb": 2048.0, "remain_mb": 0.0},
                        "packages": []}, pair, "0000", "", now=1795005000)
     assert pair["drained_last"]["id"] == "B", "同轮多个包归零应留到期更晚的那个"
+
+    saved_icloud = ICLOUD
+    with tempfile.TemporaryDirectory() as d:
+        ICLOUD = Path(d)
+        try:
+            (ICLOUD / "flow_0000_100000.json").write_text('{"updated_at": 1}')
+            (ICLOUD / "flow_0000_200000.json").write_text('{"updated_at": 2}')
+            assert snapshot_path("0000", 3).name == "flow_0000_3000.json"
+            prune_snapshots("0000", now=100 + SNAPSHOT_KEEP + 1)
+            assert [p.name for p in ICLOUD.iterdir()] == ["flow_0000_200000.json"], "只清 24h 前的轮转快照"
+        finally:
+            ICLOUD = saved_icloud
 
     seq, calls = iter(["410000", "000000"]), []
     saved = (_query, cs.mint_cookie, cs.invalidate_minted, cs.note_session_ok)

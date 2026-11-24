@@ -271,6 +271,10 @@ python3 cmcc_flow.py --install-launchd   # 同步 flow.js + 加载 launchd：每
 数据流：`cmcc_flow.py` 复用 `cmcc_session` 落盘的会话（8 小时窗口，**不需要再抓包**；只有接口回
 `410000` 或真机 App 重新登录把会话顶掉时才清缓存重签，且在**同一轮里立刻重签一次**，Widget 不会白等一个刷新周期）→ 调
 `clientaccess.10086.cn` 的套餐余量接口 → 归一化成 `~/Library/Mobile Documents/iCloud~dk~simonbs~Scriptable/Documents/flow_<尾号>.json`。
+每轮还会写一份带时间戳的 `flow_<尾号>_<epoch>.json`：同一个文件名反复原地覆盖时，手机上的 iCloud
+副本会卡在 0 字节、`downloadFileFromiCloud` 变成空操作（日志 `raw=0`），而 Mac 侧 bird 其实每轮都上传成功；
+换新文件名手机才会重新下载。Widget 优先读最新的时间戳快照，固定名继续写以兼容旧脚本，
+24 小时前的轮转文件自动清理。
 
 装 Widget（一次性）：
 
@@ -301,7 +305,9 @@ tail -20 ~/Library/Mobile\ Documents/iCloud~dk~simonbs~Scriptable/Documents/flow
 
 出现 `MISS ... dl:Error` 即 Widget 跑了但下载失败（iCloud 没同步/无网络）；`dir=[flow_9819.json.icloud]`
 说明文件只在云端没落地；`exists=true raw=0` 是文件在却读不出来，此时显示手机上本地缓存的上一份快照
-（`flow_9819.cache.json`，头部的「x 分钟前」标黄），读成功后缓存自动刷新；
+（`flow_9819.cache.json`，头部的「x 分钟前」标黄），读成功后缓存自动刷新。新版脚本会依次尝试最新的
+时间戳快照，日志里的 `src=` 表示这次实际读的是哪个文件；`src=` 一直停在旧文件说明 iCloud 连目录
+元数据都没同步下来；
 日志为空则说明 Widget 根本没刷新过（脚本没选对/被系统限流）。日志只保留最近约 12KB。
 
 接口与加密（2026-11-20 实测，与 [ha-china-mobile](https://github.com/margrop/ha-china-mobile) 的 `BIZ_KEYS` 一致）：
